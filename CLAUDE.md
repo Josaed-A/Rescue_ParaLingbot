@@ -786,7 +786,37 @@ Corridas: `results/json/n50_rep{1..5}.json`. Mismo dataset y metodología que la
 
 **Lectura para la pregunta de tiempo (señal de alerta, no resuelta):** el tiempo por frame **no solo sube, sube cada vez más rápido** (+20.4% de N=10→25, +32.2% de N=25→50) — esto es lo opuesto de "aproximadamente constante" y empieza a parecer **crecimiento no-lineal real**, no ruido de warm-up de CPU (la hipótesis de warm-up que se planteó en la Fase 2 pierde fuerza: si fuera solo caché de CPU calentándose, se esperaría que la tasa de crecimiento se desacelerara con N, no que se acelerara). Sigue sin poder descartarse contaminación por presión de memoria/paginación en esta máquina (RSS final ya en ~15.4GB en N=50, RAM libre mínima ~9.6GB — todavía con margen amplio en esta máquina de 30GB, pero la tendencia de crecimiento del propio proceso es real). **N=100 y N=200 son decisivos para esta pregunta**: si la aceleración continúa, es evidencia fuerte de que el costo por frame realmente crece con el largo de la secuencia (coherente con atención sobre un KV-cache que crece), no con inicialización de CPU.
 
-**Estado: Fases N=10, N=25 y N=50 completas (5/5, 5/5 y 5/5 éxito, 0 fallos totales). Fase N=100 (3 reps) en ejecución en background al momento de escribir esto; N=200 (3 reps) en cola.**
+### Resultados — Fase 4: N=100, 3 repeticiones (2026-08-24)
+
+Corridas: `results/json/n100_rep{1..3}.json`. Mismo dataset y metodología (primeros 100 frames de `example/courthouse`).
+
+| Métrica | Media | Mediana | Desv. estándar | Mín | Máx | Rango |
+|---|---|---|---|---|---|---|
+| Tiempo de carga del modelo (s) | 6.673 | 6.350 | 0.649 | 6.250 | 7.420 | 1.170 |
+| Tiempo de inferencia, 100 frames (s) | 1449.197 | 1452.260 | 12.021 | 1435.940 | 1459.390 | 23.450 |
+| Tiempo por frame (s) | 14.492 | 14.523 | 0.120 | 14.359 | 14.594 | 0.234 |
+| Tiempo total de la corrida (s) | 1457.730 | 1460.290 | 11.309 | 1445.360 | 1467.540 | 22.180 |
+| RSS pico (MB) | 20026.8 | 20053.0 | 87.1 | 19929.6 | 20097.7 | 168.1 |
+| RSS tras cargar el modelo (MB) | 5675.0 | 5676.4 | 15.5 | 5658.9 | 5689.8 | 30.9 |
+| RSS final, tras inferencia (MB) | 19101.7 | 19127.9 | 87.1 | 19004.6 | 19172.7 | 168.1 |
+| RAM libre mínima del sistema (MB) | 6406.1 | 6454.2 | 340.8 | 6043.8 | 6720.2 | 676.4 |
+| **ΔRAM/frame (MB/frame)** | **134.3** | 134.4 | 0.9 | 133.3 | 135.1 | 1.9 |
+
+**Tasa de fallos: 0/3 (0%).**
+
+### Comparación acumulada N=10 → N=25 → N=50 → N=100 — la aceleración del tiempo/frame se sostiene
+
+| Métrica | N=10 | N=25 | N=50 | N=100 | Tendencia |
+|---|---|---|---|---|---|
+| ΔRAM/frame (MB/frame) | 329.5 | 245.6 | 198.3 | 134.3 | **Decreciente y monótona en las 4 fases** (-25.5%, -19.3%, -32.3%) |
+| Tiempo por frame (s) | 6.322 | 7.609 | 10.059 | 14.492 | **Creciente y acelerando en las 4 fases** (+20.4%, +32.2%, **+44.1%**) |
+| RAM libre mínima (MB) | 16203.9 | 13768.9 | 9635.1 | 6406.1 | Decreciente (esperado, más RSS final consume más RAM del sistema) |
+
+**La aceleración del tiempo por frame ya no es ambigua.** Con 4 puntos, el incremento porcentual entre fases consecutivas sube cada vez (+20.4% → +32.2% → +44.1%) — esto es la firma de un crecimiento **super-lineal** (cuadrático o peor), no de ruido ni de warm-up de CPU (que se habría estabilizado o desacelerado, no acelerado de forma tan consistente). Es exactamente el patrón esperable si el costo de atención por frame depende del tamaño del contexto/KV-cache acumulado hasta ese punto (`keyframe_interval=1` en todas las fases — cada frame se vuelve keyframe y se guarda en el cache, así que el contexto crece linealmente con el frame índice, y si el costo de atender a ese contexto por frame también crece linealmente, el costo total de la secuencia se vuelve cuadrático — coherente con lo observado). **Responde la segunda pregunta de la campaña con bastante confianza ya: el tiempo por frame NO se mantiene aproximadamente constante, crece de forma no lineal con la longitud de la secuencia.**
+
+**La memoria sigue sin mostrar acumulación** — ΔRAM/frame continúa cayendo de forma monótona y ahora más pronunciada (-32.3% en el salto a N=100) — coherente con que la memoria del KV-cache por frame es mucho más barata que el cómputo de atención sobre ese cache (un patrón común: cache lineal en memoria, cuadrático en cómputo). N=200 es la prueba de fuego final para ambas conclusiones preliminares.
+
+**Estado: Fases N=10, N=25, N=50 y N=100 completas (5/5, 5/5, 5/5 y 3/3 éxito, 0 fallos en 18 corridas). Fase N=200 (3 reps, última del diseño) en ejecución en background al momento de escribir esto** — timeout configurado de 52 min por corrida, tiempo estimado real ~48-55 min por corrida dada la tendencia observada.
 
 ## Campaña de secuencia larga: estabilidad de memoria en `inference_streaming` (2026-08-24, EN PROGRESO)
 
