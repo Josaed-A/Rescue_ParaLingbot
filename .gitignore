@@ -7,7 +7,6 @@ build/
 *.so
 .eggs/
 demo_render/
-CLAUDE.md
 .claude/
 .agents/
 skyseg.onnx
@@ -16,4 +15,10 @@ weights/
 .DS_Store
 **/.DS_Store
 docs/
+.venv/
+*.pt
+*.log
+test_images/
+ram_report*.csv
+*.safetensors
 

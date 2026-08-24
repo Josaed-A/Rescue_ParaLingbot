@@ -19,6 +19,7 @@ Usage:
 """
 
 import argparse
+import gc
 import glob
 import os
 import sys
@@ -90,8 +91,13 @@ def load_images(image_folder=None, video_path=None, fps=10, image_ext=".jpg,.png
     else:
         exts = image_ext.split(",")
         paths = []
+        seen = set()
         for ext in exts:
-            paths.extend(glob.glob(os.path.join(image_folder, f"*{ext}")))
+            for p in glob.glob(os.path.join(image_folder, f"*{ext}")):
+                key = os.path.normcase(os.path.abspath(p))
+                if key not in seen:
+                    seen.add(key)
+                    paths.append(p)
         paths = sorted(paths)
         resolved_folder = image_folder
 
@@ -151,13 +157,15 @@ def load_model(args, device):
 
     if args.model_path:
         print(f"Loading checkpoint: {args.model_path}")
-        ckpt = torch.load(args.model_path, map_location=device, weights_only=False)
+        ckpt = torch.load(args.model_path, map_location=device, weights_only=False, mmap=True)
         state_dict = ckpt.get("model", ckpt)
         missing, unexpected = model.load_state_dict(state_dict, strict=False)
         if missing:
             print(f"  Missing keys: {len(missing)}")
         if unexpected:
             print(f"  Unexpected keys: {len(unexpected)}")
+        del ckpt, state_dict
+        gc.collect()
         print("  Checkpoint loaded.")
 
     return model.to(device).eval()
