@@ -18,9 +18,14 @@ Robbyant Team
 
 </div>
 
-> **⚠️ No soy autor ni contribuidor de LingBot-Map.** Todo el crédito del modelo, la arquitectura y el paper es del **Robbyant Team** ([repositorio original](https://github.com/robbyant/lingbot-map)).
+> ## Sobre este repositorio
 >
-> Este repositorio contiene un clon del proyecto original (historial de commits completo conservado, sin modificaciones a la arquitectura del modelo) usado como base/dependencia para **GARDIAN**, un proyecto de investigación distinto e independiente sobre optimización de memoria/carga de LingBot-Map en hardware CPU-only (sin GPU) para robótica de rescate. Ver [CLAUDE.md](CLAUDE.md) para el detalle completo de esa investigación, sus hallazgos y decisiones.
+> Este es el repositorio de **GARDIAN** (Ground-Aerial Response for Disaster Intelligence and Assistance Network), un subproyecto de percepción 3D para robots de búsqueda y rescate. GARDIAN es una iniciativa propia que **implementa y combina ideas de dos proyectos de terceros**, sin ser autor ni contribuidor de ninguno de los dos — todo el crédito de cada uno es de sus respectivos autores:
+>
+> - **[LingBot-Map](https://github.com/robbyant/lingbot-map)** (Robbyant Team) — motor de percepción geométrica / reconstrucción 3D en streaming a partir de cámara RGB convencional. Historial de commits original conservado íntegro en este repositorio.
+> - **[Paragraphica](https://github.com/bjoernkarmann/Paragraphica)** (Bjørn Karmann) — inspiración filosófica (no técnica) para un "Lightweight Context Analyzer": procesar solo la información visual relevante según el contexto de la escena, en vez de todo el flujo de cámara indiscriminadamente. *(Integración pendiente de añadir a este repositorio.)*
+>
+> Ver [CLAUDE.md](CLAUDE.md) para el detalle completo de la investigación (optimización de memoria de LingBot-Map en CPU sin GPU) y la filosofía completa del proyecto.
 
 https://github.com/user-attachments/assets/fe39e095-af2c-4ec9-b68d-a8ba97e505ab
 
