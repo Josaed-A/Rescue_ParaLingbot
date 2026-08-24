@@ -1,0 +1,25 @@
+Loading images:   0%|          | 0/10 [00:00<?, ?it/s]Loading images:  10%|█         | 1/10 [00:00<00:01,  8.04it/s]Loading images: 100%|██████████| 10/10 [00:00<00:00, 76.44it/s]
+Failed to load pretrained weights: [Errno 2] No such file or directory: ''
+C:\Users\josae\Rescu\lingbot-map-test\demo.py:556: UserWarning: CUDA is not available or torch_xla is imported. Disabling autocast.
+  with torch.no_grad(), torch.amp.autocast("cuda", dtype=dtype):
+Streaming inference:  80%|████████  | 8/10 [00:00<?, ?it/s]Streaming inference:  90%|█████████ | 9/10 [02:14<02:14, 134.88s/it]Streaming inference: 100%|██████████| 10/10 [03:15<00:00, 90.94s/it]Streaming inference: 100%|██████████| 10/10 [03:15<00:00, 97.55s/it]
+C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\viser\_scene_handles.py:440: UserWarning: Attempted to remove already removed node: /frames/8/pred_pts
+  warnings.warn(f"Attempted to remove already removed node: {self.name}")
+C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\viser\_scene_handles.py:440: UserWarning: Attempted to remove already removed node: /frames/2/pred_pts
+  warnings.warn(f"Attempted to remove already removed node: {self.name}")
+C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\viser\_scene_handles.py:440: UserWarning: Attempted to remove already removed node: /frames/6/pred_pts
+  warnings.warn(f"Attempted to remove already removed node: {self.name}")
+C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\viser\_scene_handles.py:440: UserWarning: Attempted to remove already removed node: /frames/9/pred_pts
+  warnings.warn(f"Attempted to remove already removed node: {self.name}")
+C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\viser\_scene_handles.py:440: UserWarning: Attempted to remove already removed node: /frames/3/pred_pts
+  warnings.warn(f"Attempted to remove already removed node: {self.name}")
+C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\viser\_scene_handles.py:440: UserWarning: Attempted to remove already removed node: /frames/7/pred_pts
+  warnings.warn(f"Attempted to remove already removed node: {self.name}")
+C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\viser\_scene_handles.py:440: UserWarning: Attempted to remove already removed node: /frames/4/pred_pts
+  warnings.warn(f"Attempted to remove already removed node: {self.name}")
+C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\viser\_scene_handles.py:440: UserWarning: Attempted to remove already removed node: /frames/5/pred_pts
+  warnings.warn(f"Attempted to remove already removed node: {self.name}")
+C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\viser\_scene_handles.py:440: UserWarning: Attempted to remove already removed node: /frames/1/pred_pts
+  warnings.warn(f"Attempted to remove already removed node: {self.name}")
+C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\viser\_scene_handles.py:440: UserWarning: Attempted to remove already removed node: /frames/0/pred_pts
+  warnings.warn(f"Attempted to remove already removed node: {self.name}")

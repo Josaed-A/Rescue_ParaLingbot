@@ -1,0 +1,19 @@
+Loading 10 images...
+Preprocessed images to 518x392 using canonical crop mode
+flashinfer not available
+Building model...
+pretrained_path: 
+Loading checkpoint: lingbot-map.pt
+  Checkpoint loaded.
+Total load time: 90.0s
+Input: 10 frames, shape (10, 3, 392, 518)
+Mode: streaming
+Running streaming inference (dtype=torch.float32)...
+Inference done in 823.1s
+Moving results to CPU...
+┌────── viser (listening *:8080) ───────┐
+│             ╷                         │
+│   HTTP      │ http://localhost:8080   │
+│   Websocket │ ws://localhost:8080     │
+│             ╵                         │
+└───────────────────────────────────────┘

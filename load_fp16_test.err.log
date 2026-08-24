@@ -1,0 +1,6 @@
+Failed to load pretrained weights: [Errno 2] No such file or directory: ''
+Loading images:   0%|          | 0/3 [00:00<?, ?it/s]Loading images:  33%|███▎      | 1/3 [00:00<00:00,  5.15it/s]Loading images: 100%|██████████| 3/3 [00:00<00:00, 15.09it/s]
+Streaming inference: 100%|██████████| 3/3 [00:00<?, ?it/s]Streaming inference: 100%|██████████| 3/3 [00:00<?, ?it/s]
+Failed to load pretrained weights: [Errno 2] No such file or directory: ''
+Loading images:   0%|          | 0/3 [00:00<?, ?it/s]Loading images:  33%|███▎      | 1/3 [00:00<00:00,  6.95it/s]Loading images: 100%|██████████| 3/3 [00:00<00:00, 20.39it/s]
+Streaming inference: 100%|██████████| 3/3 [00:00<?, ?it/s]Streaming inference: 100%|██████████| 3/3 [00:00<?, ?it/s]

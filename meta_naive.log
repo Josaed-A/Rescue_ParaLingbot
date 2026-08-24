@@ -1,0 +1,4 @@
+torch version: 2.13.0+cpu
+[STAGE] t=    0.0s 00 start (torch imported)                    ws=    209.5MB peak_ws=    209.5MB private=    427.1MB peak_pagefile=    427.1MB | sys_avail=   5494.9MB sys_load=48%
+flashinfer not available
+pretrained_path: 

@@ -1,0 +1,20 @@
+torch version: 2.13.0+cpu
+[1] Loaded original checkpoint in 0.13s: 1342 tensors
+    dtypes present: ['torch.float32']
+    non-contiguous tensors: 0
+    shared-storage groups: 0
+[2] Converted to lingbot-map_converted.safetensors in 138.21s
+[3] File sizes: lingbot-map.pt=4.632GB  lingbot-map_converted.safetensors=4.632GB  diff=-375,505 bytes (-0.38MB)
+[4] load_file() (eager) reloaded 1342 tensors in 0.42s
+    key sets identical: True
+    shape mismatches: 0 | dtype mismatches: 0 | value mismatches (bit-exact torch.equal): 0
+    VERIFICATION PASSED
+
+[5] Loading-strategy probe: safe_open() lazy per-tensor access
+    safe_open() opened file (header parsed) in 1.934s, 1342 keys visible
+    get_tensor('aggregator.camera_token') materialized ONE tensor (shape=(1, 2, 1, 1024)) in 1.2527s — confirms per-tensor lazy access works without touching the rest of the file
+    Note: state_dict key compatibility with GCTStream already confirmed (missing=0/unexpected=0 in every prior load of this checkpoint) — these are the SAME 1342 keys, so a safetensors-loaded dict would load into the model with identical strict=False semantics.
+
+DONE - audit_safetensors_conversion complete.
+
+SUMMARY: conv_time=138.21s reload_time=0.42s size_diff_MB=-0.38 verification=PASS

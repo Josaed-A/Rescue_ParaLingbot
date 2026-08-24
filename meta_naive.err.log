@@ -1,0 +1,66 @@
+Traceback (most recent call last):
+  File "C:\Users\josae\Rescu\lingbot-map-test\scripts\measure_load_meta.py", line 250, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\josae\Rescu\lingbot-map-test\scripts\measure_load_meta.py", line 168, in main
+    model = GCTStream(
+        img_size=args.image_size,
+    ...<8 lines>...
+        camera_num_iterations=args.camera_num_iterations,
+    )
+  File "C:\Users\josae\Rescu\lingbot-map-test\lingbot_map\models\gct_stream.py", line 203, in __init__
+    super().__init__(
+    ~~~~~~~~~~~~~~~~^
+        img_size=img_size,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        use_gradient_checkpoint=use_gradient_checkpoint,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\josae\Rescu\lingbot-map-test\lingbot_map\models\gct_base.py", line 89, in __init__
+    self.aggregator = self._build_aggregator()
+                      ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\josae\Rescu\lingbot-map-test\lingbot_map\models\gct_stream.py", line 227, in _build_aggregator
+    return AggregatorStream(
+        img_size=self.img_size,
+    ...<21 lines>...
+        use_gradient_checkpoint=self.use_gradient_checkpoint,
+    )
+  File "C:\Users\josae\Rescu\lingbot-map-test\lingbot_map\aggregator\stream.py", line 96, in __init__
+    super().__init__(**kwargs)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\josae\Rescu\lingbot-map-test\lingbot_map\aggregator\base.py", line 130, in __init__
+    self._build_patch_embed(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        patch_embed=patch_embed,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        pretrained_path=pretrained_path
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\josae\Rescu\lingbot-map-test\lingbot_map\aggregator\base.py", line 209, in _build_patch_embed
+    self.patch_embed = vit_models[patch_embed](
+                       ~~~~~~~~~~~~~~~~~~~~~~~^
+        img_size=img_size,
+        ^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        init_values=init_values,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\josae\Rescu\lingbot-map-test\lingbot_map\layers\vision_transformer.py", line 384, in vit_large
+    model = DinoVisionTransformer(
+        patch_size=patch_size,
+    ...<6 lines>...
+        **kwargs,
+    )
+  File "C:\Users\josae\Rescu\lingbot-map-test\lingbot_map\layers\vision_transformer.py", line 126, in __init__
+    dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+           ~~~~~~^^
+  File "C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\torch\utils\_device.py", line 122, in __torch_function__
+    return func(*args, **kwargs)
+  File "C:\Users\josae\Rescu\lingbot-map-test\.venv\Lib\site-packages\torch\_meta_registrations.py", line 8550, in meta_local_scalar_dense
+    raise RuntimeError("Tensor.item() cannot be called on meta tensors")
+RuntimeError: Tensor.item() cannot be called on meta tensors

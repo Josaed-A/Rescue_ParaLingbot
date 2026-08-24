@@ -1,0 +1,43 @@
+[STAGE] t=    0.0s 00 start (torch imported)                    ws=    210.1MB peak_ws=    210.1MB private=    427.6MB peak_pagefile=    427.6MB | sys_avail=   6305.1MB sys_load=40%
+[STAGE] t=    6.1s 01 demo module imported                      ws=    337.9MB peak_ws=    337.9MB private=    785.0MB peak_pagefile=    785.0MB | sys_avail=   5873.2MB sys_load=44%
+
+########## PHASE A: FP32 baseline (matches production dtype) ##########
+flashinfer not available
+pretrained_path: 
+[STAGE] t=   23.9s   model instantiated (fp32 random init)      ws=   5007.6MB peak_ws=   5007.6MB private=   8508.5MB peak_pagefile=   8508.5MB | sys_avail=   1299.6MB sys_load=87%
+    missing=0 unexpected=0
+[STAGE] t=   92.1s   checkpoint loaded + del/gc.collect()       ws=   2836.5MB peak_ws=   5979.0MB private=   8511.2MB peak_pagefile=  13152.7MB | sys_avail=   3624.3MB sys_load=66%
+[STAGE] t=   92.2s 02 model_fp32 ready                          ws=   2837.3MB peak_ws=   5979.0MB private=   8511.2MB peak_pagefile=  13152.7MB | sys_avail=   3630.5MB sys_load=65%
+LOAD_TIME_FP32_S=86.10
+  param memory by dtype: {'torch.float32': 4631.77415999998}
+Loading 3 images...
+Preprocessed images to 518x392 using canonical crop mode
+[STAGE] t=   92.7s 03 loaded 3 real images                      ws=   2870.7MB peak_ws=   5979.0MB private=   8529.5MB peak_pagefile=  13152.7MB | sys_avail=   3606.8MB sys_load=66%
+[STAGE] t=  301.3s 04 fp32 inference done                       ws=   3924.9MB peak_ws=   6282.9MB private=  10692.1MB peak_pagefile=  13152.7MB | sys_avail=   1967.4MB sys_load=81%
+INFER_TIME_FP32_S=208.58
+[STAGE] t=  303.2s 05 phase A freed (del model_fp32 + gc.collect()) ws=    957.7MB peak_ws=   6282.9MB private=   2045.0MB peak_pagefile=  13152.7MB | sys_avail=   5258.8MB sys_load=50%
+
+########## PHASE B: FP16 aggregator, FP32 heads ##########
+pretrained_path: 
+[STAGE] t=  321.2s   model instantiated (fp32 random init) [about to cast] ws=   5554.9MB peak_ws=   6282.9MB private=   9679.4MB peak_pagefile=  13152.7MB | sys_avail=   1157.8MB sys_load=89%
+    aggregator param memory: before={'torch.float32': 4631.77415999998} after={'torch.float16': 1818.2287359999914, 'torch.float32': 995.3166880000006}
+[STAGE] t=  322.1s   aggregator cast to float16 (heads stay float32) ws=   3549.1MB peak_ws=   6282.9MB private=   5105.8MB peak_pagefile=  13152.7MB | sys_avail=   3165.1MB sys_load=70%
+    missing=0 unexpected=0
+[STAGE] t=  369.2s   checkpoint loaded + del/gc.collect()       ws=   2364.8MB peak_ws=   6354.0MB private=   5109.1MB peak_pagefile=  13152.7MB | sys_avail=   4114.2MB sys_load=61%
+[STAGE] t=  369.5s 06 model_fp16 ready                          ws=   2365.3MB peak_ws=   6354.0MB private=   5109.1MB peak_pagefile=  13152.7MB | sys_avail=   4131.2MB sys_load=61%
+LOAD_TIME_FP16_S=65.65
+  param memory by dtype: {'torch.float16': 1818.2287359999914, 'torch.float32': 995.3166880000006}
+  [weight check] NaN=0 Inf=0 across all parameters
+  [dtype check] aggregator.camera_token: dtype=torch.float16
+  [dtype check] camera_head.empty_pose_tokens: dtype=torch.float32 (should stay float32)
+Loading 3 images...
+Preprocessed images to 518x392 using canonical crop mode
+[STAGE] t=  381.5s 07 loaded 3 real images (again, cast to float16 for the fp16 model) ws=   3179.3MB peak_ws=   6354.0MB private=   4620.9MB peak_pagefile=  13152.7MB | sys_avail=   3653.5MB sys_load=65%
+[STAGE] t= 1210.0s 08 fp16 inference done                       ws=   4301.8MB peak_ws=   6354.0MB private=   6137.3MB peak_pagefile=  13152.7MB | sys_avail=   1773.3MB sys_load=83%
+INFER_TIME_FP16_S=828.42
+
+=== NUMERICAL STABILITY: fp32 vs fp16-aggregator ===
+  pose_enc: max_abs_diff=0.000183582 mean_abs_diff=4.49877e-05 max_rel_diff=0.308377 mean_rel_diff=0.0425014 | fp16-aggregator: NaN=0 Inf=0
+  depth: max_abs_diff=0.690988 mean_abs_diff=0.0015409 max_rel_diff=0.256595 mean_rel_diff=0.00118391 | fp16-aggregator: NaN=0 Inf=0
+
+DONE - measure_load_fp16 complete.

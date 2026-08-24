@@ -1,0 +1,15 @@
+[STAGE] t=    0.0s 00 start (torch imported)                    ws=    209.6MB peak_ws=    209.6MB private=    427.0MB peak_pagefile=    427.0MB | sys_avail=   5979.8MB sys_load=43%
+flashinfer not available
+[STAGE] t=    2.3s 01 GCTStream class imported                  ws=    258.9MB peak_ws=    258.9MB private=    708.2MB peak_pagefile=    708.2MB | sys_avail=   5916.7MB sys_load=44%
+pretrained_path: 
+[STAGE] t=   21.9s 02 model instantiated (random init)          ws=   4906.9MB peak_ws=   4906.9MB private=   8411.5MB peak_pagefile=   8411.5MB | sys_avail=   1134.8MB sys_load=89%
+  param count: 1,157,943,540 (4631.8MB @ float32)
+[STAGE] t=   22.2s 03 safe_open() done (file header parsed, no tensors materialized yet) ws=   4907.5MB peak_ws=   4907.7MB private=  13052.9MB peak_pagefile=  17693.8MB | sys_avail=   1127.4MB sys_load=89%
+  copied=1342 missing=2 unexpected=0
+[STAGE] t=  138.0s 04 streaming per-tensor load complete (all matched tensors copied) ws=   2745.2MB peak_ws=   5984.4MB private=   8411.9MB peak_pagefile=  17693.8MB | sys_avail=   3356.9MB sys_load=68%
+  [functional check] aggregator.camera_token: shape=(1, 2, 1, 1024) is_meta=False norm=1.0798 has_nan=False
+  [functional check] aggregator.patch_embed.pos_embed: shape=(1, 1370, 1024) is_meta=False norm=33.7254 has_nan=False
+[STAGE] t=  139.3s 05 after del targets / gc.collect()          ws=   2869.5MB peak_ws=   5984.4MB private=   8411.9MB peak_pagefile=  17693.8MB | sys_avail=   3171.4MB sys_load=70%
+[STAGE] t=  139.4s 06 model.to(device).eval() done              ws=   2869.8MB peak_ws=   5984.4MB private=   8411.9MB peak_pagefile=  17693.8MB | sys_avail=   3173.0MB sys_load=70%
+LOAD_TIME_S=139.38
+DONE - load-only safetensors probe complete (no image loading, no inference, no viser).
