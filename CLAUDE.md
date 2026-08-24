@@ -723,7 +723,35 @@ Faltaba `viser` instalado en esta máquina (no estaba en la lista de paquetes pr
 
 **El ΔRAM/frame de ~329.5 MB/frame es un solo punto de datos (N=10) y por sí solo NO permite concluir nada sobre si la memoria es estable o acumula con la longitud de la secuencia.** Según el criterio de conclusión pedido explícitamente: no declarar estabilidad basándose en que las corridas terminaron bien — hace falta comparar ΔRAM/frame, RAM pico y tiempo/frame **entre distintos N** (10 vs 25 vs 50 vs 100 vs 200) para saber si la relación es constante, lineal, creciente no-lineal, o indeterminada. Eso es exactamente lo que sigue.
 
-**Estado: Fase 1 (N=10) completa y con datos limpios (5/5 éxito). Fases N=25, 50, 100, 200 (con 5, 5, 3, 3 repeticiones respectivamente, o el mínimo ajustado si el tiempo total lo hace excesivo, sin reducir repeticiones silenciosamente) — diseñadas, script y umbral de seguridad listos, no ejecutadas todavía.** Con el tiempo de inferencia observado aquí (~6.3s/frame en promedio), una corrida de 200 frames tomaría del orden de ~21 minutos de inferencia + ~6s de carga — mucho más viable en esta máquina que en la Windows original (donde 200 frames hubiera implicado horas). Pendiente de decisión del usuario: continuar con las fases restantes ahora.
+### Resultados — Fase 2: N=25, 5 repeticiones (2026-08-24)
+
+Corridas: `results/json/n25_rep{1..5}.json`, driver [scripts_seq/run_campaign.py](scripts_seq/run_campaign.py) (procesos nuevos secuenciales, sleep de 5s entre corridas, timeout generoso por corrida, nunca descarta una corrida fallida — ver script). Mismo dataset (`example/courthouse`, primeros 25 frames, prefijo exacto de la Fase 1).
+
+| Métrica | Media | Mediana | Desv. estándar | Mín | Máx | Rango |
+|---|---|---|---|---|---|---|
+| Tiempo de carga del modelo (s) | 6.098 | 6.030 | 0.143 | 6.010 | 6.350 | 0.340 |
+| Tiempo de inferencia, 25 frames (s) | 190.220 | 188.710 | 6.816 | 182.470 | 199.520 | 17.050 |
+| Tiempo por frame (s) | 7.609 | 7.548 | 0.273 | 7.299 | 7.981 | 0.682 |
+| Tiempo total de la corrida (s) | 197.670 | 196.380 | 6.769 | 189.970 | 206.910 | 16.940 |
+| RSS pico (MB) | 11762.8 | 11853.2 | 210.3 | 11464.3 | 11960.7 | 496.4 |
+| RSS tras cargar el modelo (MB) | 5472.1 | 5464.2 | 14.6 | 5459.9 | 5495.0 | 35.1 |
+| RSS final, tras inferencia (MB) | 11612.2 | 11623.1 | 132.5 | 11464.3 | 11749.8 | 285.5 |
+| RAM libre mínima del sistema (MB) | 13768.9 | 13665.5 | 265.5 | 13514.2 | 14163.4 | 649.2 |
+| **ΔRAM/frame (MB/frame)** | **245.6** | 246.5 | 5.2 | 240.0 | 251.5 | 11.5 |
+
+**Tasa de fallos: 0/5 (0%).**
+
+### Primera comparación entre N=10 y N=25 — todavía sin conclusión firme, pero surge una señal
+
+| Métrica | N=10 | N=25 | Cambio |
+|---|---|---|---|
+| ΔRAM/frame (MB/frame) | 329.5 | 245.6 | **-25.5%** (baja, no sube) |
+| Tiempo por frame (s) | 6.322 | 7.609 | **+20.4%** (sube) |
+| RSS tras cargar (MB) | 5416.8 | 5472.1 | +1.0% (≈ igual, esperado — no depende de N) |
+
+**Lectura preliminar (con cautela — 2 puntos no definen una tendencia):** ΔRAM/frame **bajando** al aumentar N es la dirección opuesta a "acumulación" — es más consistente con un costo fijo por-corrida (buffers de activación, KV-cache inicial, overhead del allocator) que se diluye entre más frames, no con una fuga que crece con N. Si esto se confirma en N=50/100/200, la respuesta a la pregunta de acumulación de memoria sería "no acumula, el ΔRAM/frame decreciente sugiere costo fijo amortizado" — pero con solo 2 valores de N esto es una hipótesis, no una conclusión (podría no ser monótono, podría estabilizarse, podría revertirse en secuencias más largas donde el KV-cache streaming empieza a pesar más). El tiempo por frame **sí subió** ~20% de N=10 a N=25 — a vigilar si sigue creciendo (crecimiento no-lineal real) o si se estabiliza (posible efecto de warm-up/caché de CPU en las primeras corridas, no del algoritmo).
+
+**Estado: Fases N=10 y N=25 completas (5/5 y 5/5 éxito). Fases N=50 (5 reps), N=100 (3 reps), N=200 (3 reps) — en ejecución en background en el momento de escribir esto.** Con el tiempo por frame observado subiendo (~7.6s/frame en N=25), los tiempos totales estimados son mayores a la proyección inicial pero siguen siendo del orden de minutos por corrida, no horas.
 
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
