@@ -18,6 +18,9 @@ Robbyant Team
 
 </div>
 
+> **⚠️ Este repositorio es un fork/trabajo derivado no oficial de [robbyant/lingbot-map](https://github.com/robbyant/lingbot-map).**
+> Todo el crédito del modelo LingBot-Map, la arquitectura y el paper original es del **Robbyant Team**. Este repositorio contiene únicamente investigación experimental sobre optimización de memoria/carga en CPU (sin GPU), realizada como parte del subproyecto GARDIAN de percepción 3D para robótica de rescate. Ver [CLAUDE.md](CLAUDE.md) para el detalle completo de la investigación, hallazgos y decisiones. El historial de commits completo del repositorio original se conserva intacto.
+
 https://github.com/user-attachments/assets/fe39e095-af2c-4ec9-b68d-a8ba97e505ab
 
 -----
