@@ -756,7 +756,37 @@ Corridas: `results/json/n25_rep{1..5}.json`, driver [scripts_seq/run_campaign.py
 
 **Lectura preliminar (con cautela — 2 puntos no definen una tendencia):** ΔRAM/frame **bajando** al aumentar N es la dirección opuesta a "acumulación" — es más consistente con un costo fijo por-corrida (buffers de activación, KV-cache inicial, overhead del allocator) que se diluye entre más frames, no con una fuga que crece con N. Si esto se confirma en N=50/100/200, la respuesta a la pregunta de acumulación de memoria sería "no acumula, el ΔRAM/frame decreciente sugiere costo fijo amortizado" — pero con solo 2 valores de N esto es una hipótesis, no una conclusión (podría no ser monótono, podría estabilizarse, podría revertirse en secuencias más largas donde el KV-cache streaming empieza a pesar más). El tiempo por frame **sí subió** ~20% de N=10 a N=25 — a vigilar si sigue creciendo (crecimiento no-lineal real) o si se estabiliza (posible efecto de warm-up/caché de CPU en las primeras corridas, no del algoritmo).
 
-**Estado: Fases N=10 y N=25 completas (5/5 y 5/5 éxito). Fases N=50 (5 reps), N=100 (3 reps), N=200 (3 reps) — en ejecución en background en el momento de escribir esto.** Con el tiempo por frame observado subiendo (~7.6s/frame en N=25), los tiempos totales estimados son mayores a la proyección inicial pero siguen siendo del orden de minutos por corrida, no horas.
+### Resultados — Fase 3: N=50, 5 repeticiones (2026-08-24)
+
+Corridas: `results/json/n50_rep{1..5}.json`. Mismo dataset y metodología que las fases anteriores (primeros 50 frames de `example/courthouse`, prefijo exacto de N=25/N=10).
+
+| Métrica | Media | Mediana | Desv. estándar | Mín | Máx | Rango |
+|---|---|---|---|---|---|---|
+| Tiempo de carga del modelo (s) | 6.274 | 6.290 | 0.186 | 6.030 | 6.480 | 0.450 |
+| Tiempo de inferencia, 50 frames (s) | 502.928 | 500.640 | 6.034 | 495.810 | 511.080 | 15.270 |
+| Tiempo por frame (s) | 10.059 | 10.013 | 0.121 | 9.916 | 10.222 | 0.305 |
+| Tiempo total de la corrida (s) | 510.750 | 508.530 | 5.967 | 503.610 | 518.850 | 15.240 |
+| RSS pico (MB) | 15745.8 | 15749.5 | 119.0 | 15563.2 | 15892.8 | 329.6 |
+| RSS tras cargar el modelo (MB) | 5515.8 | 5515.7 | 3.0 | 5512.0 | 5520.3 | 8.3 |
+| RSS final, tras inferencia (MB) | 15430.3 | 15441.7 | 114.3 | 15255.4 | 15572.1 | 316.7 |
+| RAM libre mínima del sistema (MB) | 9635.1 | 9613.7 | 79.2 | 9564.3 | 9754.2 | 189.9 |
+| **ΔRAM/frame (MB/frame)** | **198.3** | 198.5 | 2.3 | 194.7 | 201.2 | 6.5 |
+
+**Tasa de fallos: 0/5 (0%).** Nótese además que la variabilidad entre repeticiones se redujo mucho respecto a N=10/25 (coeficientes de variación de ΔRAM/frame y tiempo/frame ambos <1.2% en N=50, vs ~3-9% en N=10) — con secuencias más largas el ruido de una sola corrida pesa menos sobre el promedio, resultado esperable.
+
+### Comparación acumulada N=10 → N=25 → N=50 — dos tendencias claras y opuestas
+
+| Métrica | N=10 | N=25 | N=50 | Tendencia |
+|---|---|---|---|---|
+| ΔRAM/frame (MB/frame) | 329.5 | 245.6 | 198.3 | **Decreciente y monótona** (-25.5%, luego -19.3%) |
+| Tiempo por frame (s) | 6.322 | 7.609 | 10.059 | **Creciente y acelerando** (+20.4%, luego +32.2%) |
+| RSS tras cargar (MB) | 5416.8 | 5472.1 | 5515.8 | Prácticamente constante (no depende de N, como se esperaba) |
+
+**Lectura para la pregunta de memoria (más sólida ahora, con 3 puntos monótonos):** el ΔRAM/frame sigue bajando de forma consistente y monótona en las 3 fases — la memoria por frame usada al final de la corrida se diluye a medida que crece la secuencia, la dirección **opuesta** a lo que se vería si hubiera una fuga o acumulación real de estado por frame. Todavía **no es una conclusión final** (el criterio pedido exige N=100/200 también, y hace falta confirmar que no revierte en secuencias más largas donde el KV-cache streaming podría empezar a dominar), pero con 3 puntos monótonos en la misma dirección la hipótesis de "costo fijo amortizado, no acumulación" gana bastante peso.
+
+**Lectura para la pregunta de tiempo (señal de alerta, no resuelta):** el tiempo por frame **no solo sube, sube cada vez más rápido** (+20.4% de N=10→25, +32.2% de N=25→50) — esto es lo opuesto de "aproximadamente constante" y empieza a parecer **crecimiento no-lineal real**, no ruido de warm-up de CPU (la hipótesis de warm-up que se planteó en la Fase 2 pierde fuerza: si fuera solo caché de CPU calentándose, se esperaría que la tasa de crecimiento se desacelerara con N, no que se acelerara). Sigue sin poder descartarse contaminación por presión de memoria/paginación en esta máquina (RSS final ya en ~15.4GB en N=50, RAM libre mínima ~9.6GB — todavía con margen amplio en esta máquina de 30GB, pero la tendencia de crecimiento del propio proceso es real). **N=100 y N=200 son decisivos para esta pregunta**: si la aceleración continúa, es evidencia fuerte de que el costo por frame realmente crece con el largo de la secuencia (coherente con atención sobre un KV-cache que crece), no con inicialización de CPU.
+
+**Estado: Fases N=10, N=25 y N=50 completas (5/5, 5/5 y 5/5 éxito, 0 fallos totales). Fase N=100 (3 reps) en ejecución en background al momento de escribir esto; N=200 (3 reps) en cola.**
 
 ## Campaña de secuencia larga: estabilidad de memoria en `inference_streaming` (2026-08-24, EN PROGRESO)
 
