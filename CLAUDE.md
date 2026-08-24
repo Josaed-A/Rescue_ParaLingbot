@@ -24,7 +24,9 @@ RGB camera → LingBot-Map → depth + pose estimados → point cloud, tratando 
 
 **Todos los scripts de experimentos viven en `scripts/`** (cada uno documentado y enlazado en su sección correspondiente más abajo) — son herramientas de diagnóstico reutilizables, no parte del pipeline de producción.
 
-**Pendiente de decisión del usuario (nada de esto se ha iniciado):** campaña controlada de ≥10 repeticiones sobre el baseline actual (diseño ya completo, ver sección más abajo), continuar la línea de redundancia de frames con secuencias más largas/variadas, o abrir una nueva línea de investigación.
+**Actualización 2026-08-24 (segunda mitad del día) — nueva línea iniciada, en máquina distinta:** arrancó la "campaña de caracterización secuencial" (¿la memoria de LingBot-Map se mantiene estable o acumula al procesar secuencias largas de frames reales de una misma trayectoria?). Corre en una **máquina Linux nueva** (no la Windows de 10GB documentada abajo), con GPU disponible pero **CPU forzada deliberadamente** para preservar el baseline FP32 exacto. Fase 1 (N=10, 5 repeticiones) completada con éxito. Ver sección "Campaña de caracterización secuencial (nueva máquina Linux)" más abajo para el detalle completo — **no editar el resto de este documento (todo lo de la máquina Windows) como referencia histórica**, esta nueva sección documenta un entorno distinto, no un reemplazo.
+
+**Pendiente de decisión del usuario:** continuar la campaña secuencial con N=25/50/100/200 (diseño y script ya listos, ver sección nueva), continuar la línea de redundancia de frames con secuencias más largas/variadas, o abrir una nueva línea de investigación.
 
 ## Estado del diagnóstico (ya hecho, no repetir)
 - Máquina: Windows, AMD Ryzen 5 3500U (4 cores/8 threads), **sin GPU NVIDIA/CUDA**, gráficos integrados Vega.
@@ -645,6 +647,84 @@ Patrón consistente en las 9 transiciones (grid 4×4, % de píxeles cambiados po
 
 **Próximo paso natural (no iniciado):** repetir este mismo análisis con una secuencia más larga y/o con distintos tipos de movimiento (robot detenido, giro lento, avance rápido) para ver si el patrón de baja redundancia se sostiene, antes de invertir en construir un detector de cambios real.
 
+## Campaña de caracterización secuencial (nueva máquina Linux) (2026-08-24)
+
+**Objetivo distinto a todo lo anterior:** antes de pasar a webcam real, caracterizar el comportamiento de LingBot-Map procesando una **secuencia temporal real** (misma trayectoria, frames consecutivos, no imágenes independientes) de longitud creciente (10→25→50→100→200 frames), para responder dos preguntas: (1) ¿la memoria se mantiene aproximadamente estable al aumentar la longitud de la secuencia, o acumula? (2) ¿el tiempo por frame se mantiene aproximadamente constante, o crece con la longitud? **No se modificó `demo.py` ni se introdujo ninguna optimización nueva** — se mantiene exactamente el baseline ya validado (FP32 + `mmap=True` + `del ckpt/state_dict` + `gc.collect()`, ya presentes en el `load_model()` real del repo).
+
+### Discrepancia de entorno detectada antes de empezar — importante, leer primero
+
+Esta sesión corre en una **máquina Linux distinta** a la Windows de 10GB/sin-GPU documentada en todo el resto de este archivo: Linux, 20 núcleos, ~30GB RAM, **GPU con CUDA disponible** (`torch.cuda.is_available()==True`). Esto es relevante porque `demo.py` selecciona dispositivo automáticamente (`cuda` si está disponible) y en GPU castea el `aggregator` a bf16/fp16 (líneas 462-474) — lo que **rompería la instrucción explícita de mantener FP32**. Por eso, para esta campaña, **se fuerza CPU explícitamente vía `CUDA_VISIBLE_DEVICES=""` en el entorno del subproceso** (sin tocar `demo.py` ni ningún archivo de `lingbot_map`) — es la única forma de preservar el baseline FP32 tal como está definido, dado que este código solo usa FP32 cuando CUDA no está disponible.
+
+**Consecuencia importante para interpretar los números de esta sección:** al ser hardware distinto (CPU distinta, 3× más RAM, sin la presión de memoria que motivó toda la investigación de optimización de carga documentada arriba), **los valores absolutos de esta campaña NO son comparables directamente contra los picos de 13.1GB/16.1GB etc. de la máquina Windows** — esta máquina tiene mucho más margen y nunca estuvo cerca de un límite crítico en las pruebas hechas hasta ahora. Lo que sí es válido y es el objetivo real de esta campaña: la **tendencia relativa** de memoria/tiempo al aumentar N frames, dentro de esta misma máquina.
+
+### Dataset: secuencia real identificada (no armada a mano)
+
+El repo trae de fábrica `example/` con tres secuencias oficiales, cada una con frames numerados secuencialmente (`000000.png`, `000001.png`, ...), confirmadas como trayectorias reales continuas (no imágenes sueltas):
+- `example/courthouse/`: **286 frames** — elegida para esta campaña (permite llegar a 200 con margen).
+- `example/university/`: 324 frames.
+- `example/loop/`: 237 frames.
+
+`demo.load_images()` con `first_k=N` sobre una carpeta ordena por nombre de archivo (`sorted(paths)`) y toma los primeros N — es decir, N=10 es prefijo exacto de N=25, que es prefijo de N=50, etc., todos empezando en `000000.png`. Esto es deliberado: mismo punto de partida de la trayectoria para todas las longitudes, sin mezclar secuencias.
+
+### Bugs de entorno resueltos (no del código de `lingbot_map`, del entorno de esta máquina nueva) — necesarios para poder correr cualquier prueba
+
+Ninguno de estos es una optimización ni toca `demo.py`/`lingbot_map`; son dependencias faltantes o desactualizadas en esta máquina nueva, en el mismo espíritu que los fixes de matplotlib/Windows ya documentados arriba para la otra máquina:
+
+1. **`Pillow` desactualizado (9.0.1 → 12.3.0):** `lingbot_map/utils/load_fn.py` usa `Image.Resampling.BICUBIC` (líneas 85 y 176), atributo agregado en Pillow ≥9.1.0. La máquina traía 9.0.1 preinstalado, rompía `load_and_preprocess_images` con `AttributeError`. `pyproject.toml` no fija versión de Pillow (solo `"Pillow"`), así que no es una incompatibilidad del proyecto, es un paquete de sistema viejo — se corrigió con `pip install --upgrade "Pillow>=9.1.0"`, sin tocar ningún archivo del repo.
+2. **`einops` y `huggingface_hub` no instalados:** dependencias declaradas en `pyproject.toml` pero nunca instaladas en esta máquina (no se corrió `pip install -e .`). Instaladas directamente vía pip (`einops`, `huggingface_hub`) sin crear entorno virtual — el resto de dependencias pesadas (`torch 2.12.0+cu130`, `opencv 4.13`, `numpy 1.26.4`) ya estaban preinstaladas en el sistema.
+3. **`matplotlib` desactualizado (3.5.1 → 3.10.9), dirección OPUESTA al bug de matplotlib ya documentado arriba para la máquina Windows:** el fix ya presente en `lingbot_map/vis/point_cloud_viewer.py` y `lingbot_map/vis/utils.py` usa `matplotlib.colormaps.get_cmap('viridis')` (API nueva, porque `matplotlib.cm.get_cmap()` fue removido en matplotlib ≥3.11 — ver el bug documentado arriba). Pero esta máquina traía matplotlib **3.5.1**, tan vieja que `matplotlib.colormaps` existe como objeto (`ColormapRegistry`) pero **su método `.get_cmap()` todavía no existía** en esa versión — `AttributeError: 'ColormapRegistry' object has no attribute 'get_cmap'`, disparado recién al construir el `PointCloudViewer` (después de cargar el modelo e inferir, ya con el visor `viser` levantado). Mismo patrón que el bug de Pillow: `pyproject.toml` no fija versión de matplotlib, es un paquete de sistema desactualizado, no una incompatibilidad real del proyecto — se corrigió con `pip install --upgrade matplotlib` (→3.10.9, que sí tiene `colormaps.get_cmap()`), sin tocar ningún archivo del repo.
+4. **Checkpoint no descargado + throttling severo de Hugging Face para este repo específico:** `lingbot-map.pt` (4.63GB) no estaba en esta máquina. La descarga directa desde `huggingface.co/robbyant/lingbot-map` estaba limitada a **~2.6-9 KB/s** (confirmado con pruebas de rango simple, 4 conexiones paralelas y 8 conexiones paralelas — el paralelismo empeoró el throughput agregado, consistente con un rate-limit del lado del servidor específico a ese recurso/repo, no un límite de ancho de banda genérico: un archivo de prueba de otro repo de HF, `bert-base-uncased`, bajó a ~2.2MB/s sin problema). A ese ritmo la descarga hubiera tardado semanas. **Solución: descargar vía el mirror comunitario `hf-mirror.com`**, que resuelve al mismo backend firmado de HF (`us.aws.cdn.hf.co/xet-bridge-us/...`) pero sin el throttling — ~650KB/s, descarga completa en ~15-20 min. Checkpoint verificado íntegro tras la descarga: `torch.load(mmap=True)` exitoso, **1342 tensores** — coincide exactamente con el conteo ya documentado arriba para el checkpoint original.
+
+**No se tocó ningún archivo de `lingbot_map/` ni `demo.py` para resolver nada de esto.**
+
+### Instrumentación nueva (equivalente Linux de `measure_ram.ps1`, no reemplaza nada de lo anterior)
+
+La máquina Windows usaba `ctypes`/`GetProcessMemoryInfo` (Windows API) y `measure_ram.ps1` (PowerShell) — no existen en Linux. Instrumentación nueva, en `scripts_seq/` (carpeta separada de `scripts/`, que sigue siendo específica de la investigación en la máquina Windows):
+
+- **[scripts_seq/monitor.py](scripts_seq/monitor.py):** `MemoryMonitor`, hilo en background que muestrea cada `sample_interval` segundos (0.5s en esta campaña) durante **todo** el proceso — incluida la llamada monolítica a `model.inference_streaming()`, que no expone un hook por-frame sin modificar `lingbot_map`. Registra por muestra: RSS (working set), USS (`memory_full_info().uss`, el equivalente Linux más cercano a "memoria privada" de Windows — memoria única del proceso, no compartida), RAM libre del sistema. Trackea picos (`peak_rss_mb`, `peak_uss_mb`) y el mínimo de RAM libre del sistema sobre toda la corrida, sin depender del muestreo para detectar el pico exacto tanto como se pudo con `ctypes` en Windows (limitación reconocida: Linux no expone un contador de "peak memory" nativo tan directo como `PeakWorkingSetSize`/`PeakPagefileUsage` de Windows sin usar `/proc/[pid]/status` `VmHWM`/`VmPeak`, no usado aquí — el pico reportado es el máximo observado en el muestreo a 0.5s, no un contador exacto del kernel). **Condición de seguridad implementada:** si la RAM libre del sistema cae debajo de `safety_free_mb` (2048MB en esta campaña), el hilo monitor fuerza `os._exit(75)` inmediatamente — corte duro deliberado (no graceful) porque un hilo en background no puede interrumpir de forma segura un cómputo de PyTorch en curso en el hilo principal, y el objetivo es evitar llegar a un estado de presión extrema como el que causó el APPCRASH documentado arriba en la máquina Windows, no esperarlo.
+- **[scripts_seq/run_single.py](scripts_seq/run_single.py):** ejecuta **una** corrida completa como proceso nuevo. Reutiliza `demo.load_model()` y `demo.load_images()` reales (importa `demo` como módulo, no reimplementa nada), con los mismos argumentos que las corridas baseline documentadas arriba (`--use_sdpa`, `--camera_num_iterations 1`, `keyframe_interval` automático = 1 para N≤320, igual que el default de `demo.py`). Al arrancar con `CUDA_VISIBLE_DEVICES=""` desde el proceso llamador, `import torch` nunca ve CUDA — se agregó además un `assert not torch.cuda.is_available()` explícito al inicio del script, para que la corrida falle ruidosamente en vez de silenciosamente si algún día se corre sin forzar CPU. Snapshots discretos en 5 puntos (`start`, `after_images`, `after_load`, `after_inference`, `final`) + el muestreo continuo de `monitor.py` en paralelo (igual metodología de doble medición que se usó en la máquina Windows: snapshots discretos + monitor externo fino). Escribe un JSON por corrida con todas las métricas pedidas (tiempos, memoria en cada snapshot, pico, éxito/fallo, código de salida, razón de salida). Cualquier excepción se captura, se registra `success:false` con traceback, y el proceso termina con exit code ≠0 — nunca se descarta una corrida fallida silenciosamente.
+
+### Resultados — Fase 1: N=10, 5 repeticiones (2026-08-24)
+
+Corridas: `results/json/n10_rep1_smoke.json` (primera corrida, prueba de humo) + `n10_rep{2,3,4,5}.json`. Las 5 son procesos completamente nuevos (invocación separada de `run_single.py` cada vez), secuencia `example/courthouse`, mismos primeros 10 frames en las 5 corridas.
+
+| Métrica | Media | Mediana | Desv. estándar | Mín | Máx | Rango |
+|---|---|---|---|---|---|---|
+| Tiempo de carga del modelo (s) | 6.206 | 6.120 | 0.156 | 6.120 | 6.480 | 0.360 |
+| Tiempo de inferencia, 10 frames (s) | 63.218 | 59.770 | 5.502 | 58.450 | 69.410 | 10.960 |
+| Tiempo por frame (s) | 6.322 | 5.977 | 0.550 | 5.845 | 6.941 | 1.096 |
+| Tiempo total de la corrida (s) | 70.704 | 67.170 | 5.627 | 65.840 | 76.860 | 11.020 |
+| RSS pico (MB) | 9568.1 | 9399.5 | 292.7 | 9316.9 | 10007.4 | 690.5 |
+| USS pico (MB, ≈"privada" de Windows) | 9544.9 | 9381.9 | 321.8 | 9289.0 | 10021.8 | 732.8 |
+| RSS tras cargar el modelo (MB) | 5416.8 | 5417.8 | 4.6 | 5412.1 | 5423.3 | 11.2 |
+| RSS final, tras inferencia (MB) | 8711.4 | 8745.1 | 109.4 | 8526.7 | 8806.5 | 279.8 |
+| RAM libre mínima del sistema (MB) | 16203.9 | 16286.2 | 226.4 | 15956.4 | 16442.0 | 485.6 |
+| **ΔRAM/frame = (RSS final − RSS tras carga) / 10 (MB/frame)** | **329.5** | 332.7 | 10.8 | 311.5 | 338.8 | 27.4 |
+
+**Tasa de fallos: 0/5 (0%).** Ninguna corrida se acercó al umbral de seguridad (2048MB) — la RAM libre mínima observada (15956MB) tiene un margen enorme, muy distinto a la máquina Windows de 10GB. Ningún `SAFETY_ABORT` disparado.
+
+**Consistencia entre repeticiones:** el tiempo de carga y la memoria justo después de cargar el modelo son muy estables (stdev 0.156s y 4.6MB respectivamente, coeficientes de variación <1%) — esperable, es determinístico (mismos pesos, mismo checkpoint). El tiempo de inferencia y la memoria final tienen más variabilidad (stdev ~9% y ~1.5% respectivamente) — consistente con ruido de scheduling de CPU en una máquina compartida de 20 núcleos, no con un problema del pipeline.
+
+**Comparación de rendimiento contra la máquina Windows (dato de contexto, no el objetivo de esta fase):** carga del modelo ~6.2s aquí vs ~90-110s en Windows (mmap+gc); inferencia ~6.3s/frame aquí vs ~65s/frame en Windows streaming. Esperable dado el hardware muy superior (20 núcleos vs 4, sin presión de RAM) — no es una optimización nueva, es la misma arquitectura de carga corriendo en hardware distinto.
+
+### Verificación con el `demo.py` real (no `run_single.py`) + visor `viser` (2026-08-24)
+
+Además de la instrumentación con `run_single.py`, se corrió el **entrypoint de producción real, sin modificar**, con el mismo comando baseline documentado en toda la investigación previa (`--use_sdpa --camera_num_iterations 1`), sobre `example/courthouse` (10 frames), CPU forzada igual que el resto de la campaña:
+```bash
+CUDA_VISIBLE_DEVICES="" python3 demo.py --model_path checkpoints/lingbot-map.pt \
+  --image_folder example/courthouse --use_sdpa --camera_num_iterations 1 \
+  --first_k 10 --port 8080
+```
+Faltaba `viser` instalado en esta máquina (no estaba en la lista de paquetes preinstalados) — instalado vía `pip install "viser>=0.2.23"` (trae `trimesh` como dependencia). Primer intento falló al construir `PointCloudViewer` por el bug de matplotlib descrito arriba (ítem 3); corregido, se repitió la corrida.
+
+**Resultado: éxito completo.** Carga 6.2s, inferencia 10 frames en 57.1s (~5.9s/frame, consistente con la Fase 1 de la campaña), visor `viser` levantado y **escuchando establemente en `0.0.0.0:8080`** (confirmado con `ss -tlnp`, proceso vivo varios minutos sin caerse). Como esta máquina no tiene navegador accesible desde esta sesión de terminal, no se verificó visualmente el point cloud — solo que el servidor sirve sin errores, igual que se hizo en las corridas de la máquina Windows documentadas arriba. Accesible desde la misma red vía `http://172.23.13.81:8080` (IP LAN de esta máquina) o `http://localhost:8080` desde la propia máquina.
+
+### Lo que esta fase NO responde todavía — explícito, no ocultar
+
+**El ΔRAM/frame de ~329.5 MB/frame es un solo punto de datos (N=10) y por sí solo NO permite concluir nada sobre si la memoria es estable o acumula con la longitud de la secuencia.** Según el criterio de conclusión pedido explícitamente: no declarar estabilidad basándose en que las corridas terminaron bien — hace falta comparar ΔRAM/frame, RAM pico y tiempo/frame **entre distintos N** (10 vs 25 vs 50 vs 100 vs 200) para saber si la relación es constante, lineal, creciente no-lineal, o indeterminada. Eso es exactamente lo que sigue.
+
+**Estado: Fase 1 (N=10) completa y con datos limpios (5/5 éxito). Fases N=25, 50, 100, 200 (con 5, 5, 3, 3 repeticiones respectivamente, o el mínimo ajustado si el tiempo total lo hace excesivo, sin reducir repeticiones silenciosamente) — diseñadas, script y umbral de seguridad listos, no ejecutadas todavía.** Con el tiempo de inferencia observado aquí (~6.3s/frame en promedio), una corrida de 200 frames tomaría del orden de ~21 minutos de inferencia + ~6s de carga — mucho más viable en esta máquina que en la Windows original (donde 200 frames hubiera implicado horas). Pendiente de decisión del usuario: continuar con las fases restantes ahora.
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
@@ -715,9 +795,11 @@ La profundidad monocular tiene ambigüedad de escala — no asumir que es una me
 4. ~~Medir RAM pico durante carga e inferencia~~ — hecho exhaustivamente: crash inicial diagnosticado (APPCRASH en `c10.dll`), causa raíz localizada en `load_model()`, pico reducido de 16.1GB a 13.1GB con `mmap=True`+`del/gc.collect()` (ambos ya aplicados a `demo.py`).
 5. ~~Evaluar reducción de precisión~~ — FP16 y INT8 dinámico probados y descartados para esta CPU (ver "Estado actual"); ninguno se aplicó a producción.
 6. ~~Primer análisis de redundancia temporal entre frames~~ — hecho con las 10 imágenes existentes, análisis de imagen puro; resultado: baja redundancia en esta muestra (ver sección correspondiente).
+7. ~~Campaña de caracterización secuencial, Fase 1 (N=10, 5 repeticiones)~~ — hecha en la máquina Linux nueva (ver sección "Campaña de caracterización secuencial" arriba), 0 fallos, datos limpios. **La pregunta de acumulación de memoria sigue sin respuesta** — necesita N=25/50/100/200 para comparar tendencia.
 
 **Pendiente, sin iniciar (requiere decisión del usuario antes de arrancar):**
-- Campaña controlada de ≥10 repeticiones sobre el baseline actual optimizado (diseño completo ya documentado arriba, en la sección del reporte de crash original — adaptar al baseline con mmap+gc antes de correr, ya que fue diseñada contra el baseline sin optimizar).
+- Campaña de caracterización secuencial, Fases N=25/50/100/200 — script y umbral de seguridad ya listos (`scripts_seq/run_single.py`), solo falta ejecutar las repeticiones restantes.
+- Campaña controlada de ≥10 repeticiones sobre el baseline actual optimizado (diseño completo ya documentado arriba, en la sección del reporte de crash original — adaptar al baseline con mmap+gc antes de correr, ya que fue diseñada contra el baseline sin optimizar). Esta es la campaña de **la máquina Windows**, distinta de la campaña secuencial de arriba.
 - Repetir el análisis de redundancia de frames con secuencias más largas/variadas (robot detenido, giro lento, avance rápido) antes de construir un detector de cambios real.
 - Crear rama git separada en este repo para una eventual versión "lightweight" (`git checkout -b lightweight`), dejando `main` como espejo del upstream intacto — no creada todavía, todo el trabajo hasta ahora vive en `main` como scripts de diagnóstico, sin tocar `lingbot_map/` ni la arquitectura.
 - Reducción de resolución (Exp1 del plan experimental original) — no evaluada todavía.

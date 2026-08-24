@@ -1,0 +1,116 @@
+"""Drive the sequential-characterization campaign across frame-count tiers.
+
+Launches scripts_seq/run_single.py as a completely fresh subprocess for every
+repetition (never reuses a process), with CUDA hidden so the FP32 CPU baseline is
+preserved. Never silently drops a failed run: if run_single.py exits non-zero, times
+out, or gets killed (OOM/SIGKILL) without writing a JSON, a synthetic failure record
+is appended anyway. Results are appended to results/campaign_results.jsonl as they
+land, so a partial campaign is never lost.
+"""
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SEQUENCE_DIR = os.path.join(REPO_ROOT, "example", "courthouse")
+MODEL_PATH = os.path.join(REPO_ROOT, "checkpoints", "lingbot-map.pt")
+RESULTS_JSONL = os.path.join(REPO_ROOT, "results", "campaign_results.jsonl")
+JSON_DIR = os.path.join(REPO_ROOT, "results", "json")
+CSV_DIR = os.path.join(REPO_ROOT, "results", "csv")
+
+# (num_frames, num_repetitions) — matches the campaign design in CLAUDE.md.
+TIERS = [(25, 5), (50, 5), (100, 3), (200, 3)]
+
+# Generous per-run timeout: base overhead (load + startup) + per-frame budget with
+# a wide safety margin over the ~6.3s/frame observed in Phase 1 (N=10).
+SECONDS_PER_FRAME_BUDGET = 15
+BASE_OVERHEAD_S = 120
+
+
+def run_one(num_frames, rep_idx):
+    run_id = f"n{num_frames}_rep{rep_idx}"
+    out_json = os.path.join(JSON_DIR, f"{run_id}.json")
+    csv_out = os.path.join(CSV_DIR, f"{run_id}.csv")
+    cmd = [
+        sys.executable, os.path.join(REPO_ROOT, "scripts_seq", "run_single.py"),
+        "--num_frames", str(num_frames),
+        "--sequence_dir", SEQUENCE_DIR,
+        "--model_path", MODEL_PATH,
+        "--run_id", run_id,
+        "--out_json", out_json,
+        "--csv_out", csv_out,
+        "--sample_interval", "0.5",
+        "--safety_free_mb", "2048",
+    ]
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = ""
+
+    timeout_s = BASE_OVERHEAD_S + num_frames * SECONDS_PER_FRAME_BUDGET
+    t0 = time.time()
+    print(f"[{time.strftime('%H:%M:%S')}] START {run_id} (timeout={timeout_s}s)", flush=True)
+
+    record = None
+    try:
+        proc = subprocess.run(
+            cmd, cwd=REPO_ROOT, env=env, timeout=timeout_s,
+            start_new_session=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        wall = time.time() - t0
+        if os.path.exists(out_json):
+            with open(out_json) as f:
+                record = json.load(f)
+            record["driver_returncode"] = proc.returncode
+        else:
+            record = {
+                "run_id": run_id, "num_frames": num_frames, "success": False,
+                "exit_reason": "no_output_file", "driver_returncode": proc.returncode,
+                "driver_wall_time_s": round(wall, 2),
+                "tail_output": proc.stdout.decode(errors="replace")[-2000:] if proc.stdout else "",
+            }
+    except subprocess.TimeoutExpired as e:
+        wall = time.time() - t0
+        record = {
+            "run_id": run_id, "num_frames": num_frames, "success": False,
+            "exit_reason": "timeout", "timeout_s": timeout_s,
+            "driver_wall_time_s": round(wall, 2),
+            "tail_output": (e.stdout or b"").decode(errors="replace")[-2000:] if e.stdout else "",
+        }
+        # subprocess.run with a timeout does not guarantee the child (and any of its
+        # own children) are dead; belt-and-suspenders cleanup by process group.
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:
+            pass
+    except Exception as e:
+        wall = time.time() - t0
+        record = {
+            "run_id": run_id, "num_frames": num_frames, "success": False,
+            "exit_reason": "driver_exception", "error": str(e),
+            "driver_wall_time_s": round(wall, 2),
+        }
+
+    with open(RESULTS_JSONL, "a") as f:
+        f.write(json.dumps(record) + "\n")
+
+    status = "OK" if record.get("success") else f"FAIL({record.get('exit_reason')})"
+    print(f"[{time.strftime('%H:%M:%S')}] END   {run_id} {status} "
+          f"wall={time.time()-t0:.1f}s", flush=True)
+    return record
+
+
+def main():
+    os.makedirs(JSON_DIR, exist_ok=True)
+    os.makedirs(CSV_DIR, exist_ok=True)
+    for num_frames, reps in TIERS:
+        for rep_idx in range(1, reps + 1):
+            run_one(num_frames, rep_idx)
+            time.sleep(5)  # let the system settle between fresh processes
+    print("CAMPAIGN COMPLETE", flush=True)
+
+
+if __name__ == "__main__":
+    main()

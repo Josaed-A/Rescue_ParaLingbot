@@ -21,4 +21,6 @@ docs/
 test_images/
 ram_report*.csv
 *.safetensors
+checkpoints/
+results/
 
