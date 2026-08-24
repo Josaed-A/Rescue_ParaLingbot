@@ -1,0 +1,5 @@
+Loading images:   0%|          | 0/10 [00:00<?, ?it/s]Loading images: 100%|██████████| 10/10 [00:00<00:00, 200.61it/s]
+Failed to load pretrained weights: [Errno 2] No such file or directory: ''
+C:\Users\josae\Rescu\lingbot-map-test\demo.py:559: UserWarning: CUDA is not available or torch_xla is imported. Disabling autocast.
+  with torch.no_grad(), torch.amp.autocast("cuda", dtype=dtype):
+Streaming inference:  80%|████████  | 8/10 [00:00<?, ?it/s]Streaming inference:  90%|█████████ | 9/10 [02:34<02:34, 154.51s/it]Streaming inference: 100%|██████████| 10/10 [04:44<00:00, 139.98s/it]Streaming inference: 100%|██████████| 10/10 [04:44<00:00, 142.18s/it]

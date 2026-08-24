@@ -1,0 +1,13 @@
+[STAGE] t=    0.0s 00 start (torch imported)          ws=    208.8MB peak_ws=    208.8MB private=    426.5MB peak_pagefile=    426.5MB | sys_avail=   6604.9MB sys_load=38%
+flashinfer not available
+[STAGE] t=    2.0s 01 GCTStream class imported        ws=    258.3MB peak_ws=    258.3MB private=    707.6MB peak_pagefile=    707.6MB | sys_avail=   6544.2MB sys_load=38%
+pretrained_path: 
+[STAGE] t=   20.2s 02 model instantiated (random init) ws=   4906.8MB peak_ws=   4906.8MB private=   8411.4MB peak_pagefile=   8411.4MB | sys_avail=   1790.2MB sys_load=83%
+  param count: 1,157,943,540 (4631.8MB @ float32)
+[STAGE] t=   90.4s 03 torch.load done (ckpt dict in RAM) ws=    521.5MB peak_ws=   6188.8MB private=  16114.1MB peak_pagefile=  16114.1MB | sys_avail=   1078.7MB sys_load=89%
+[STAGE] t=   90.5s 04 state_dict extracted from ckpt  ws=    521.7MB peak_ws=   6188.8MB private=  16114.1MB peak_pagefile=  16114.1MB | sys_avail=   1081.1MB sys_load=89%
+  missing=0 unexpected=0
+[STAGE] t=  244.5s 05 load_state_dict done (ckpt still referenced) ws=   6326.4MB peak_ws=   6573.0MB private=  16114.0MB peak_pagefile=  16114.1MB | sys_avail=    382.8MB sys_load=96%
+[STAGE] t=  246.1s 06 after del ckpt+state_dict / gc.collect() ws=   5623.6MB peak_ws=   6573.0MB private=  12901.7MB peak_pagefile=  16114.1MB | sys_avail=   1060.2MB sys_load=90%
+[STAGE] t=  246.2s 07 model.to(device).eval() done    ws=   5624.4MB peak_ws=   6573.0MB private=  12901.7MB peak_pagefile=  16114.1MB | sys_avail=   1059.2MB sys_load=90%
+DONE - load-only probe complete (no image loading, no inference, no viser).

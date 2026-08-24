@@ -1,0 +1,10 @@
+[STAGE] t=    0.0s 00 start (torch imported)                ws=    209.3MB peak_ws=    209.3MB private=    426.9MB peak_pagefile=    426.9MB | sys_avail=   5825.3MB sys_load=45%
+[STAGE] t=    8.4s 01 demo module imported                  ws=    337.3MB peak_ws=    337.3MB private=    784.3MB peak_pagefile=    784.3MB | sys_avail=   5463.5MB sys_load=48%
+flashinfer not available
+Building model...
+pretrained_path: 
+Loading checkpoint: lingbot-map.pt
+  Checkpoint loaded.
+[STAGE] t=  309.7s 02 demo.load_model() returned            ws=   4774.1MB peak_ws=   6537.4MB private=  11552.0MB peak_pagefile=  16209.9MB | sys_avail=   2074.7MB sys_load=80%
+LOAD_TIME_S=301.35
+DONE - verify_load_fix complete (real demo.load_model(), no image loading, no inference, no viser).

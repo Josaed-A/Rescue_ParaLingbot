@@ -24,9 +24,14 @@ RGB camera → LingBot-Map → depth + pose estimados → point cloud, tratando 
 
 **Todos los scripts de experimentos viven en `scripts/`** (cada uno documentado y enlazado en su sección correspondiente más abajo) — son herramientas de diagnóstico reutilizables, no parte del pipeline de producción.
 
-**Actualización 2026-08-24 (segunda mitad del día) — nueva línea iniciada, en máquina distinta:** arrancó la "campaña de caracterización secuencial" (¿la memoria de LingBot-Map se mantiene estable o acumula al procesar secuencias largas de frames reales de una misma trayectoria?). Corre en una **máquina Linux nueva** (no la Windows de 10GB documentada abajo), con GPU disponible pero **CPU forzada deliberadamente** para preservar el baseline FP32 exacto. Fase 1 (N=10, 5 repeticiones) completada con éxito. Ver sección "Campaña de caracterización secuencial (nueva máquina Linux)" más abajo para el detalle completo — **no editar el resto de este documento (todo lo de la máquina Windows) como referencia histórica**, esta nueva sección documenta un entorno distinto, no un reemplazo.
+**Actualización 2026-08-24 — DOS líneas paralelas e independientes investigando la misma pregunta, en máquinas distintas, fusionadas en este documento (no se descarta ninguna de las dos):**
 
-**Pendiente de decisión del usuario:** continuar la campaña secuencial con N=25/50/100/200 (diseño y script ya listos, ver sección nueva), continuar la línea de redundancia de frames con secuencias más largas/variadas, o abrir una nueva línea de investigación.
+1. **Máquina Linux nueva** (esta sesión): "Campaña de caracterización secuencial" — GPU disponible pero **CPU forzada deliberadamente** para preservar el baseline FP32 exacto. Fases N=10 y N=25 completadas (5/5 y 5/5 éxito). Ver sección "Campaña de caracterización secuencial (nueva máquina Linux)" más abajo.
+2. **Máquina Windows original** (sesión paralela, documentada arriba en todo el resto del archivo): "Campaña de secuencia larga" — primera corrida real de reconocimiento completada (20 frames, éxito), tras recalibrar el umbral de seguridad del monitor externo (bajado a 15MB — el margen normal de este baseline en esa máquina ya es de pocos cientos de MB). Dato único: 148.89s/frame promedio, ΔRAM/frame=250.7MB. Ver sección "Campaña de secuencia larga: estabilidad de memoria en `inference_streaming`" más abajo.
+
+**Ambas atacan la misma pregunta (¿memoria estable o acumulativa al crecer la secuencia?) con el mismo dataset (`example/courthouse`) y el mismo baseline, pero en hardware muy distinto — tratarlas como dos fuentes de evidencia independientes, no fusionar sus números.** La máquina Windows es ~20× más lenta por frame en esta comparación preliminar (148.89s/frame vs ~6-8s/frame en Linux) y opera con márgenes de RAM mucho más ajustados — buen caso para eventualmente comparar si la tendencia (constante/creciente/etc.) es la misma en ambas o si es un artefacto de una máquina específica. **No editar ninguna de las dos secciones de campaña como si fuera la otra — son corridas y datos reales de máquinas distintas.**
+
+**Pendiente de decisión del usuario:** continuar la campaña secuencial en Linux con N=50/100/200 (en curso al momento de este merge, ver sección nueva), decidir el alcance real de la campaña en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o abrir una nueva línea de investigación.
 
 ## Estado del diagnóstico (ya hecho, no repetir)
 - Máquina: Windows, AMD Ryzen 5 3500U (4 cores/8 threads), **sin GPU NVIDIA/CUDA**, gráficos integrados Vega.
@@ -752,6 +757,59 @@ Corridas: `results/json/n25_rep{1..5}.json`, driver [scripts_seq/run_campaign.py
 **Lectura preliminar (con cautela — 2 puntos no definen una tendencia):** ΔRAM/frame **bajando** al aumentar N es la dirección opuesta a "acumulación" — es más consistente con un costo fijo por-corrida (buffers de activación, KV-cache inicial, overhead del allocator) que se diluye entre más frames, no con una fuga que crece con N. Si esto se confirma en N=50/100/200, la respuesta a la pregunta de acumulación de memoria sería "no acumula, el ΔRAM/frame decreciente sugiere costo fijo amortizado" — pero con solo 2 valores de N esto es una hipótesis, no una conclusión (podría no ser monótono, podría estabilizarse, podría revertirse en secuencias más largas donde el KV-cache streaming empieza a pesar más). El tiempo por frame **sí subió** ~20% de N=10 a N=25 — a vigilar si sigue creciendo (crecimiento no-lineal real) o si se estabiliza (posible efecto de warm-up/caché de CPU en las primeras corridas, no del algoritmo).
 
 **Estado: Fases N=10 y N=25 completas (5/5 y 5/5 éxito). Fases N=50 (5 reps), N=100 (3 reps), N=200 (3 reps) — en ejecución en background en el momento de escribir esto.** Con el tiempo por frame observado subiendo (~7.6s/frame en N=25), los tiempos totales estimados son mayores a la proyección inicial pero siguen siendo del orden de minutos por corrida, no horas.
+
+## Campaña de secuencia larga: estabilidad de memoria en `inference_streaming` (2026-08-24, EN PROGRESO)
+
+**Objetivo:** caracterizar si LingBot-Map mantiene memoria aproximadamente estable o acumula estado al procesar secuencias largas (10→200 frames), usando la secuencia real y ordenada `example/courthouse/` (286 frames, misma trayectoria, HF dataset oficial — no se mezcla con `test_images/`). Diseño completo: 10/25/50 frames ×5 repeticiones, 100/200 frames ×3 repeticiones, cada corrida en proceso nuevo, sobre el baseline oficial sin modificar (`demo.py::load_model()` con `mmap=True`+`del/gc.collect()`, intacto). **No se aplicó ninguna optimización nueva ni se tocó `demo.py`/`lingbot_map` en esta línea de investigación.**
+
+Herramientas nuevas (solo instrumentación externa, no tocan el pipeline real):
+- [scripts/sequence_run_single.py](scripts/sequence_run_single.py) — una corrida = un proceso nuevo; llama `demo.load_model()` y `demo.load_images()` reales sin modificar, corre `model.inference_streaming(images, num_scale_frames=min(n,8), keyframe_interval=1, output_device=None)` (mismo `keyframe_interval` que `demo.py` auto-selecciona para secuencias ≤320 frames — no es un cambio de parámetro), escribe un JSON con métricas completas por corrida, incluyendo corridas fallidas (`success=false` + traceback, nunca se descartan).
+- [scripts/measure_ram_safety.ps1](scripts/measure_ram_safety.ps1) — extiende `measure_ram.ps1` con corte de seguridad: si la RAM libre del sistema cae bajo `-SafetyThresholdMB`, mata el proceso monitoreado y registra `ABORT_REASON=safety_threshold_breached` en vez de esperar a que Windows llegue a presión extrema.
+
+### Calibración del umbral de seguridad — hallazgo previo a cualquier corrida útil
+
+Los primeros 3 intentos de reconocimiento (20 frames) fueron abortados por el mecanismo de seguridad **durante la sola carga del modelo**, antes de procesar ningún frame — con umbrales de 300MB, 250MB y 100MB, en ese orden. La sospecha inicial (contención de RAM por otras apps del usuario — VS Code, sesiones de Claude Code concurrentes) se descartó con evidencia: la trayectoria de RAM en cada intento abortado muestra la memoria privada del propio proceso subiendo de forma continua y consumiendo el RAM libre en paralelo — es la fase ya documentada de instanciación del modelo + `torch.load(mmap=True)` (que reserva ~13GB de memoria comprometida casi instantáneamente), no un pico externo.
+
+La causa raíz real: esta máquina tiene 10.177GB de RAM física total, y el baseline optimizado ya tiene un pico de carga documentado de ~13.1-13.2GB (ver sección de `mmap=True` arriba) — una brecha estructural de ~3GB que **ningún cierre de aplicaciones puede compensar** (el uso combinado de apps no esenciales en esta máquina es de ~2-3GB, no ~3GB+ recuperables). Además, corridas históricas *exitosas* de este mismo baseline ya habían tocado 20.8-196.9MB de RAM libre como comportamiento normal (ver experimentos INT8 y `verify_load_fix` arriba) — no hay margen cómodo entre "corrida exitosa" y "corrida en riesgo" en este hardware. Se verificó también que el pagefile (23.3GB, gestionado automáticamente) no es el cuello de botella — el límite es la RAM física en sí.
+
+**Decisión (consultada con el usuario):** recalibrar el umbral a 15MB — protege solo contra agotamiento literal, aceptando que corridas exitosas legítimas pasarán muy cerca del límite, tal como ya lo hacían antes de que existiera este mecanismo. Los fallos se registran, no se descartan, tal como pide la metodología de esta campaña.
+
+### Primera corrida real completada: 20 frames, 1 repetición (reconocimiento, no forma parte todavía del conteo de repeticiones de la campaña)
+
+Con el umbral recalibrado, la corrida de reconocimiento (20 frames) **completó con éxito** (`sequence_results/recon_d.json`, `run_id=recon_d`):
+
+| Etapa | t (s) | private (MB) | working set (MB) | sys avail (MB) |
+|---|---|---|---|---|
+| 00 inicio | 0.0 | 427.2 | 209.7 | 4808.4 |
+| 01 modelo cargado | 108.6 | 8512.2 | 1649.9 | 1583.5 |
+| 02 imágenes cargadas (20) | 109.7 | 8631.4 | 1742.8 | 1539.1 |
+| 03 inferencia completa | 3087.6 | **13525.9** | 5350.4 | 1000.1 |
+
+| Métrica | Valor |
+|---|---|
+| Tiempo de carga | 103.69 s (consistente con el baseline ya documentado, ~90-110s) |
+| Tiempo total de inferencia streaming (20 frames) | **2977.80 s (≈49.6 min)** |
+| Tiempo medio por frame (sobre los 20) | 148.89 s/frame |
+| Pico de working set (contador interno) | 6488.9 MB |
+| **Pico de memoria comprometida** (peak_pagefile) | **14219.4 MB — más alto que el pico de solo-carga ya documentado (~13.1-13.2GB)**, confirma que la inferencia en sí añade al pico, no solo la carga |
+| RAM libre mínima del sistema (nunca cruzó el umbral de 15MB) | 1000.1 MB al final; mínimos puntuales más bajos vistos por el monitor externo durante la inferencia (ver `calibration_logs/ram_recon_20d_part2.csv`) |
+| **ΔRAM/frame** = (final − tras carga) / n_frames = (13525.9 − 8512.2) / 20 | **250.7 MB/frame** (un solo dato — no permite todavía distinguir tendencia creciente de meseta; requiere los demás tiers) |
+| Salidas: NaN/Inf | 0 / 0 |
+| Claves de predicción | `pose_enc, depth, depth_conf, images, frame_type, is_keyframe` |
+
+**Hallazgo preliminar sobre tiempo por frame — no confirmado, solo 1 corrida:** el desglose por frame individual (extraído del progreso interno, frames 9-20 tras el lote inicial de 8 "scale frames" que se procesan casi de golpe) muestra una tendencia **creciente, pero ruidosa**, no una constante limpia:
+
+| Frame (streaming individual) | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Tiempo (s) | 176 | 120 | 122 | 137 | 143 | 214 | 200 | 393 | 328 | 211 | 214 | 245 |
+
+Los primeros frames individuales (9-13) rondan 120-176s; los últimos (14-20) rondan 200-393s — sugiere una tendencia al alza, pero con picos irregulares (frame 16 a 393s, casi 2× el frame anterior) que podrían deberse tanto a crecimiento real de costo computacional (KV-cache/contexto acumulado) como a paginación/presión de memoria en esta máquina tan ajustada (memoria privada subiendo hacia 13.5GB durante estos mismos frames) — **no se puede distinguir la causa con una sola corrida**. Coherente con la pregunta central de la campaña, pero no es evidencia suficiente todavía (criterio de conclusión de la campaña exige repeticiones consistentes, no una corrida).
+
+### Estado de la campaña — no completada, esto es 1 de 21 corridas mínimas
+
+**Esta única corrida de 20 frames NO forma parte del diseño formal (10/25/50/100/200)** — fue reconocimiento para calibrar el umbral de seguridad y obtener un dato real de tiempo antes de comprometerse al diseño completo. Con ~50 min para una sola corrida de 20 frames, y una tendencia de tiempo-por-frame que no es plana, el presupuesto de tiempo real de las 21 corridas propuestas (10×5, 25×5, 50×5, 100×3, 200×3) es sustancialmente mayor a lo estimado originalmente — plausgalmente muchas horas a días de ejecución continua, sobre todo en los tiers de 50/100/200 frames si el crecimiento por frame se sostiene.
+
+**Pendiente, sin iniciar:** las 21 corridas formales del diseño (o el subconjunto reducido que el usuario decida usando su propia cláusula de contingencia ya expresada: priorizar 10/25/50 con repeticiones completas, usar 100/200 solo para confirmar tendencia con menos repeticiones, documentando explícitamente cualquier reducción). Análisis estadístico completo (media/mediana/desviación/mín/máx/tasa de fallos por tier, ΔRAM/frame vs n_frames, tiempo/frame vs n_frames, clasificación constante/lineal/no-lineal) pendiente de tener múltiples corridas por tier — no se puede hacer con n=1.
 
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.

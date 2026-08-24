@@ -1,0 +1,13 @@
+[STAGE] t=    0.0s 00 start                       ws=    209.7MB peak_ws=    209.7MB private=    427.2MB peak_pagefile=    427.2MB | sys_avail=   4808.4MB
+flashinfer not available
+Building model...
+pretrained_path: 
+Loading checkpoint: lingbot-map.pt
+  Checkpoint loaded.
+[STAGE] t=  108.6s 01 model loaded                ws=   1649.9MB peak_ws=   4482.5MB private=   8512.2MB peak_pagefile=  13153.6MB | sys_avail=   1583.5MB
+Loading 20 images...
+Preprocessed images to 518x294 using canonical crop mode
+[STAGE] t=  109.7s 02 images loaded               ws=   1742.8MB peak_ws=   4482.5MB private=   8631.4MB peak_pagefile=  13153.6MB | sys_avail=   1539.1MB
+[STAGE] t= 3087.6s 03 inference done              ws=   5350.4MB peak_ws=   6488.9MB private=  13525.9MB peak_pagefile=  14219.4MB | sys_avail=   1000.1MB
+DONE - sequence_run_single complete.
+EXIT=0

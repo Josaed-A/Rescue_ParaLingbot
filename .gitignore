@@ -17,9 +17,6 @@ weights/
 docs/
 .venv/
 *.pt
-*.log
-test_images/
-ram_report*.csv
 *.safetensors
 checkpoints/
 results/

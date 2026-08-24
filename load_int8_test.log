@@ -1,0 +1,44 @@
+[STAGE] t=    0.0s 00 start (torch imported)                    ws=    209.3MB peak_ws=    209.3MB private=    426.7MB peak_pagefile=    426.7MB | sys_avail=   5903.5MB sys_load=44%
+quantized engine: onednn (supported: ['onednn'])
+[STAGE] t=    4.9s 01 demo module imported                      ws=    337.8MB peak_ws=    337.8MB private=    784.7MB peak_pagefile=    784.7MB | sys_avail=   5667.3MB sys_load=46%
+
+########## PHASE A: FP32 baseline (matches production dtype) ##########
+flashinfer not available
+pretrained_path: 
+[STAGE] t=   24.0s   model instantiated (fp32 random init)      ws=   5007.8MB peak_ws=   5007.8MB private=   8508.8MB peak_pagefile=   8508.8MB | sys_avail=    960.4MB sys_load=91%
+    missing=0 unexpected=0
+[STAGE] t=  115.9s   checkpoint loaded + del/gc.collect() (fp32, real weight values) ws=   3248.4MB peak_ws=   6058.1MB private=   8511.4MB peak_pagefile=  13152.9MB | sys_avail=   3373.8MB sys_load=68%
+[STAGE] t=  116.0s 02 model_fp32 ready                          ws=   3249.3MB peak_ws=   6058.1MB private=   8511.4MB peak_pagefile=  13152.9MB | sys_avail=   3378.5MB sys_load=68%
+LOAD_TIME_FP32_S=111.05
+  param memory (fp32): 4631.8MB
+Loading 3 images...
+Preprocessed images to 518x392 using canonical crop mode
+[STAGE] t=  116.5s 03 loaded 3 real images                      ws=   3282.5MB peak_ws=   6058.1MB private=   8529.7MB peak_pagefile=  13152.9MB | sys_avail=   3337.2MB sys_load=68%
+[STAGE] t=  301.7s 04 fp32 inference done                       ws=   4423.8MB peak_ws=   6126.4MB private=  11031.5MB peak_pagefile=  13152.9MB | sys_avail=    981.4MB sys_load=90%
+INFER_TIME_FP32_S=185.23
+[STAGE] t=  303.8s 05 phase A freed (del model_fp32 + gc.collect()) ws=    337.9MB peak_ws=   6126.4MB private=    971.0MB peak_pagefile=  13152.9MB | sys_avail=   5848.5MB sys_load=45%
+
+########## PHASE B: INT8 dynamic quantization (aggregator Linear layers) ##########
+pretrained_path: 
+[STAGE] t=  320.5s   model instantiated (fp32 random init)      ws=   4964.3MB peak_ws=   6126.4MB private=   8624.2MB peak_pagefile=  13152.9MB | sys_avail=   1644.0MB sys_load=84%
+    missing=0 unexpected=0
+[STAGE] t=  396.2s   checkpoint loaded + del/gc.collect() (fp32, real weight values) ws=   2667.7MB peak_ws=   6203.7MB private=   8627.8MB peak_pagefile=  13269.2MB | sys_avail=   3646.4MB sys_load=65%
+[STAGE] t=  396.3s 06 model loaded (still fp32, about to quantize) ws=   2668.1MB peak_ws=   6203.7MB private=   8627.7MB peak_pagefile=  13269.2MB | sys_avail=   3652.3MB sys_load=65%
+LOAD_TIME_FP32_STAGE_S=92.54
+  nn.Linear layers found in aggregator: 288
+[STAGE] t=  566.1s   quantize_dynamic(aggregator) done          ws=   4211.7MB peak_ws=   6203.7MB private=  12456.4MB peak_pagefile=  17008.2MB | sys_avail=   1115.4MB sys_load=89%
+QUANT_TIME_S=169.76
+  quantized (torch.ao.nn.quantized.dynamic.Linear) layers now in aggregator: 288
+LOAD_TIME_INT8_TOTAL_S=262.30
+Loading 3 images...
+Preprocessed images to 518x392 using canonical crop mode
+[STAGE] t=  566.9s 07 loaded 3 real images (no dtype cast needed for weight-only quant) ws=   4239.9MB peak_ws=   6203.7MB private=  11492.6MB peak_pagefile=  17008.2MB | sys_avail=   1102.4MB sys_load=89%
+[STAGE] t=  735.9s 08 int8 inference done                       ws=   4598.3MB peak_ws=   6203.7MB private=  13348.0MB peak_pagefile=  17008.2MB | sys_avail=    960.2MB sys_load=91%
+INFER_TIME_INT8_S=168.98
+  [output check] total NaN=0 Inf=0 across pose_enc+depth
+
+=== NUMERICAL STABILITY: fp32 vs int8-aggregator ===
+  pose_enc: max_abs_diff=0.00596786 mean_abs_diff=0.00174611 max_rel_diff=4.89732 mean_rel_diff=0.783362 | int8-aggregator: NaN=0 Inf=0
+  depth: max_abs_diff=4.53963 mean_abs_diff=0.103907 max_rel_diff=2.85126 mean_rel_diff=0.0786917 | int8-aggregator: NaN=0 Inf=0
+
+DONE - measure_load_int8 complete.

@@ -1,0 +1,70 @@
+{
+  "run_id": "recon_d",
+  "n_frames": 20,
+  "success": true,
+  "error": null,
+  "stages": [
+    {
+      "t_s": 0.001323699951171875,
+      "label": "00 start",
+      "ws_mb": 209.707008,
+      "peak_ws_mb": 209.707008,
+      "private_mb": 427.237376,
+      "peak_pagefile_mb": 427.237376,
+      "sys_avail_mb": 4808.445952,
+      "sys_load_pct": 54
+    },
+    {
+      "t_s": 108.59401798248291,
+      "label": "01 model loaded",
+      "ws_mb": 1649.897472,
+      "peak_ws_mb": 4482.47808,
+      "private_mb": 8512.18432,
+      "peak_pagefile_mb": 13153.591296,
+      "sys_avail_mb": 1583.49312,
+      "sys_load_pct": 85
+    },
+    {
+      "t_s": 109.73269820213318,
+      "label": "02 images loaded",
+      "ws_mb": 1742.78656,
+      "peak_ws_mb": 4482.47808,
+      "private_mb": 8631.369728,
+      "peak_pagefile_mb": 13153.591296,
+      "sys_avail_mb": 1539.096576,
+      "sys_load_pct": 85
+    },
+    {
+      "t_s": 3087.578139781952,
+      "label": "03 inference done",
+      "ws_mb": 5350.412288,
+      "peak_ws_mb": 6488.92416,
+      "private_mb": 13525.9136,
+      "peak_pagefile_mb": 14219.415552,
+      "sys_avail_mb": 1000.144896,
+      "sys_load_pct": 90
+    }
+  ],
+  "load_time_s": 103.6913948059082,
+  "private_after_load_mb": 8512.18432,
+  "ws_after_load_mb": 1649.897472,
+  "sys_avail_after_load_mb": 1583.49312,
+  "n_images_loaded": 20,
+  "infer_time_s": 2977.8005640506744,
+  "time_per_frame_s": 148.89002820253373,
+  "private_final_mb": 13525.9136,
+  "ws_final_mb": 5350.412288,
+  "sys_avail_final_mb": 1000.144896,
+  "peak_ws_mb": 6488.92416,
+  "peak_pagefile_mb": 14219.415552,
+  "predictions_keys": [
+    "pose_enc",
+    "depth",
+    "depth_conf",
+    "images",
+    "frame_type",
+    "is_keyframe"
+  ],
+  "output_nan_count": 0,
+  "output_inf_count": 0
+}

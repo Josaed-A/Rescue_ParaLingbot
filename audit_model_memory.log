@@ -1,0 +1,45 @@
+[STAGE] t=    0.0s 00 start (torch imported)                ws=    209.8MB peak_ws=    209.8MB private=    427.1MB peak_pagefile=    427.1MB | sys_avail=   5917.6MB sys_load=44%
+[STAGE] t=    5.9s 01 demo module imported                  ws=    337.6MB peak_ws=    337.6MB private=    784.6MB peak_pagefile=    784.6MB | sys_avail=   5700.1MB sys_load=46%
+  [gc cross-check] live tensors before model load: n=0 total=0.0MB
+flashinfer not available
+Building model...
+pretrained_path: 
+Loading checkpoint: lingbot-map.pt
+  Checkpoint loaded.
+[STAGE] t=  119.4s 02 demo.load_model() returned (mmap+gc active) ws=   2991.5MB peak_ws=   6086.3MB private=   8511.8MB peak_pagefile=  13153.3MB | sys_avail=   3137.0MB sys_load=70%
+  [gc cross-check] live tensors after model load: n=1345 total=4632.3MB
+
+=== COMPONENT MEMORY BREAKDOWN ===
+component                                        params      dtype   param_MB  buffer_MB
+----------------------------------------------------------------------------------------
+aggregator                                  909,114,368 torch.float32     3636.5        0.0
+    aggregator.patch_embed                     304,372,736 torch.float32     1217.5        0.0
+    aggregator.rope                                      0          -        0.0        0.0
+    aggregator.frame_blocks                    302,364,672 torch.float32     1209.5        0.0
+    aggregator.global_blocks                   302,364,672 torch.float32     1209.5        0.0
+    aggregator.rope3d                                    0          -        0.0        0.0
+    aggregator.<direct params/bufs>                   12,294          -        0.0        0.0
+    aggregator.rope3d.freqs (plain attr, NOT in state_dict)         32,768 torch.complex128     0.5243        0.0
+camera_head                                 216,174,610 torch.float32      864.7        0.0
+depth_head                                   32,654,562 torch.float32      130.6        0.0
+----------------------------------------------------------------------------------------
+TOTAL (params+buffers, enumerated)                                     4632.3        0.0
+
+=== RECONCILIATION ===
+  Total params (numel):                1,157,943,540
+  Theoretical param memory (float32):      4631.8 MB
+  Enumerated param+buffer memory:          4632.3 MB
+  gc-based live-tensor total (dedup):      4632.3 MB
+  Process private memory (measured):       8511.8 MB
+  UNACCOUNTED (process private - gc live-tensor total):    3879.5 MB  (process/allocator overhead not attributable to any live PyTorch tensor)
+[STAGE] t=  119.8s 03 model.eval() done                     ws=   2994.6MB peak_ws=   6086.3MB private=   8511.8MB peak_pagefile=  13153.3MB | sys_avail=   3140.1MB sys_load=70%
+Loading 3 images...
+Preprocessed images to 518x392 using canonical crop mode
+[STAGE] t=  120.2s 04 loaded 3 real images for inference probe ws=   3022.8MB peak_ws=   6086.3MB private=   8530.1MB peak_pagefile=  13153.3MB | sys_avail=   3107.7MB sys_load=70%
+  [before inference] live tensors n=1346 total=4639.6MB | process private=8530.1MB
+[STAGE] t=  327.5s 05 first inference_streaming() call done ws=   2991.1MB peak_ws=   6358.0MB private=  10690.6MB peak_pagefile=  13153.3MB | sys_avail=   2364.4MB sys_load=77%
+  [after inference] live tensors n=1407 total=5875.9MB | process private=10693.5MB
+  INFERENCE DELTA: gc-live-tensor +1236.2MB, process private +2163.4MB (activations, KV cache, and other transient tensors from 3 frames)
+  predictions keys: ['pose_enc', 'depth', 'depth_conf', 'images', 'frame_type', 'is_keyframe']
+
+DONE - audit_model_memory complete.

@@ -1,0 +1,15 @@
+[STAGE] t=    0.0s 00 start (torch imported)          ws=    208.6MB peak_ws=    208.6MB private=    426.1MB peak_pagefile=    426.1MB | sys_avail=   5550.1MB sys_load=47%
+flashinfer not available
+[STAGE] t=    1.9s 01 GCTStream class imported        ws=    258.5MB peak_ws=    258.5MB private=    707.6MB peak_pagefile=    707.6MB | sys_avail=   5474.3MB sys_load=48%
+pretrained_path: 
+[STAGE] t=   20.8s 02 model instantiated (random init) ws=   4905.9MB peak_ws=   4905.9MB private=   8410.9MB peak_pagefile=   8410.9MB | sys_avail=    781.1MB sys_load=92%
+  param count: 1,157,943,540 (4631.8MB @ float32)
+[STAGE] t=   21.5s 03 torch.load(mmap=True) done      ws=   4909.5MB peak_ws=   4909.5MB private=  13055.6MB peak_pagefile=  13055.6MB | sys_avail=    787.6MB sys_load=92%
+[STAGE] t=   21.5s 04 state_dict extracted from ckpt  ws=   4909.5MB peak_ws=   4909.5MB private=  13055.6MB peak_pagefile=  13055.6MB | sys_avail=    787.6MB sys_load=92%
+  missing=0 unexpected=0
+[STAGE] t=  109.9s 05 load_state_dict done (ckpt still referenced) ws=   4775.9MB peak_ws=   5509.9MB private=  13055.5MB peak_pagefile=  13055.6MB | sys_avail=    446.7MB sys_load=95%
+  [functional check] aggregator.camera_token: shape=(1, 2, 1, 1024) is_meta=False norm=1.0798 has_nan=False
+  [functional check] aggregator.patch_embed.pos_embed: shape=(1, 1370, 1024) is_meta=False norm=33.7254 has_nan=False
+[STAGE] t=  112.5s 06 after del ckpt+state_dict / gc.collect() ws=   2432.5MB peak_ws=   5509.9MB private=   8414.1MB peak_pagefile=  13055.6MB | sys_avail=   2821.9MB sys_load=73%
+[STAGE] t=  112.5s 07 model.to(device).eval() done    ws=   2432.9MB peak_ws=   5509.9MB private=   8414.1MB peak_pagefile=  13055.6MB | sys_avail=   2823.3MB sys_load=73%
+DONE - load-only mmap probe complete (no image loading, no inference, no viser).
