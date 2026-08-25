@@ -20,4 +20,5 @@ docs/
 *.safetensors
 checkpoints/
 results/
+results_gpu/
 
