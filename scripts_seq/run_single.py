@@ -106,7 +106,28 @@ def main():
         dtype = torch.float32  # CPU path in demo.py always uses float32
 
         num_frames = images.shape[0]
-        keyframe_interval = 1  # demo.py's own auto-logic for num_frames <= 320
+        # Verbatim copy of demo.py main()'s own auto-selection logic (was
+        # hardcoded to 1 here before -- silently wrong for num_frames > 320,
+        # where demo.py's real default is > 1). All N in Phases 1-5 were <= 200,
+        # so this bug never actually changed behavior until now.
+        if num_frames > 320:
+            keyframe_interval = (num_frames + 319) // 320
+        else:
+            keyframe_interval = 1
+        result["keyframe_interval_used"] = keyframe_interval
+
+        # Timestamp each individual streaming-inference frame against the
+        # monitor's clock, without touching lingbot_map/demo.py source files.
+        import tqdm.auto as tqdm_auto
+        _orig_update = tqdm_auto.tqdm.update
+
+        def _patched_update(self_bar, n=1):
+            ret = _orig_update(self_bar, n)
+            if getattr(self_bar, "desc", None) == "Streaming inference":
+                mon.note_frame(self_bar.n)
+            return ret
+
+        tqdm_auto.tqdm.update = _patched_update
 
         t0 = time.time()
         with torch.no_grad(), torch.amp.autocast("cuda", dtype=dtype):
@@ -117,6 +138,9 @@ def main():
                 output_device=None,
             )
         result["inference_time_s"] = round(time.time() - t0, 2)
+
+        tqdm_auto.tqdm.update = _orig_update  # restore
+        result["frame_events"] = mon.frame_events
         result["per_frame_time_s"] = round(result["inference_time_s"] / num_frames, 4)
         result["snapshot_after_inference"] = mon.snapshot("after_inference")
 
@@ -135,6 +159,7 @@ def main():
         result["exit_reason"] = "exception"
         result["error"] = str(e)
         result["traceback"] = traceback.format_exc()
+        result["frame_events"] = mon.frame_events
 
     finally:
         mon_summary = mon.stop()

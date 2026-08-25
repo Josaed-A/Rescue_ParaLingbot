@@ -38,14 +38,15 @@ TIMEOUT_SAFETY_FACTOR = 2.0
 BASE_OVERHEAD_S = 120
 
 
-def run_one(num_frames, rep_idx):
-    run_id = f"n{num_frames}_rep{rep_idx}"
+def run_one(num_frames, rep_idx, sequence_dir=SEQUENCE_DIR, timeout_s=None,
+            run_id_prefix="n"):
+    run_id = f"{run_id_prefix}{num_frames}_rep{rep_idx}"
     out_json = os.path.join(JSON_DIR, f"{run_id}.json")
     csv_out = os.path.join(CSV_DIR, f"{run_id}.csv")
     cmd = [
         sys.executable, os.path.join(REPO_ROOT, "scripts_seq", "run_single.py"),
         "--num_frames", str(num_frames),
-        "--sequence_dir", SEQUENCE_DIR,
+        "--sequence_dir", sequence_dir,
         "--model_path", MODEL_PATH,
         "--run_id", run_id,
         "--out_json", out_json,
@@ -56,9 +57,15 @@ def run_one(num_frames, rep_idx):
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = ""
 
-    predicted_inference_s = (QUADRATIC_TIME_A * num_frames ** 2
-                              + QUADRATIC_TIME_B * num_frames)
-    timeout_s = int(BASE_OVERHEAD_S + predicted_inference_s * TIMEOUT_SAFETY_FACTOR)
+    if timeout_s is None:
+        # NOTE: this quadratic fit was calibrated on N=50/100 and already
+        # over-predicted N=200 by ~27% (Phase 5 showed the growth decelerating,
+        # not staying quadratic) -- it's a safe (generous) upper bound for
+        # extrapolating further, not an accurate estimate beyond N=200. For runs
+        # past the fitted range, pass an explicit timeout_s instead of trusting it.
+        predicted_inference_s = (QUADRATIC_TIME_A * num_frames ** 2
+                                  + QUADRATIC_TIME_B * num_frames)
+        timeout_s = int(BASE_OVERHEAD_S + predicted_inference_s * TIMEOUT_SAFETY_FACTOR)
     t0 = time.time()
     print(f"[{time.strftime('%H:%M:%S')}] START {run_id} (timeout={timeout_s}s)", flush=True)
 
@@ -121,6 +128,24 @@ def main():
              "list, e.g. '200:3' -- for resuming a single tier after fixing a bug "
              "without re-running tiers that already completed cleanly.",
     )
+    p.add_argument(
+        "--sequence_dir", type=str, default=SEQUENCE_DIR,
+        help="Override the frame sequence folder (default: example/courthouse, "
+             "the one used by Phases 1-5). Pass a different real ordered "
+             "trajectory folder (e.g. example/university) when the default "
+             "sequence doesn't have enough frames for the requested N.",
+    )
+    p.add_argument(
+        "--timeout_s", type=int, default=None,
+        help="Manual per-run timeout override, bypassing the quadratic estimate "
+             "-- required when extrapolating past N=200 (the model's fitted "
+             "range), since it's known to over-predict there (see run_one()).",
+    )
+    p.add_argument(
+        "--run_id_prefix", type=str, default="n",
+        help="Prefix for run_id/output filenames, e.g. 'univ_n' to avoid "
+             "colliding with existing n<N>_rep<r> files from a different sequence.",
+    )
     args = p.parse_args()
 
     tiers = TIERS
@@ -134,7 +159,8 @@ def main():
     os.makedirs(CSV_DIR, exist_ok=True)
     for num_frames, reps in tiers:
         for rep_idx in range(1, reps + 1):
-            run_one(num_frames, rep_idx)
+            run_one(num_frames, rep_idx, sequence_dir=args.sequence_dir,
+                    timeout_s=args.timeout_s, run_id_prefix=args.run_id_prefix)
             time.sleep(5)  # let the system settle between fresh processes
     print("CAMPAIGN COMPLETE", flush=True)
 
