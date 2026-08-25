@@ -24,9 +24,17 @@ CSV_DIR = os.path.join(REPO_ROOT, "results", "csv")
 # (num_frames, num_repetitions) — matches the campaign design in CLAUDE.md.
 TIERS = [(25, 5), (50, 5), (100, 3), (200, 3)]
 
-# Generous per-run timeout: base overhead (load + startup) + per-frame budget with
-# a wide safety margin over the ~6.3s/frame observed in Phase 1 (N=10).
-SECONDS_PER_FRAME_BUDGET = 15
+# Per-run timeout. Phases 1-4 (N=10/25/50/100) showed inference time is NOT linear
+# in num_frames -- it accelerates (per-frame cost grows with sequence length,
+# consistent with attention over a linearly-growing KV-cache under
+# keyframe_interval=1). A flat per-frame budget (the original approach) is what
+# caused n200_rep1 to time out at 3120s. Model total inference time as quadratic,
+# fit on the observed Phase 3/4 means (N=50: 502.9s, N=100: 1449.2s):
+#   a*50^2 + b*50 = 502.9 ;  a*100^2 + b*100 = 1449.2  =>  a=0.0887, b=5.62
+# then apply a 2x safety margin on top of the model's own prediction.
+QUADRATIC_TIME_A = 0.0887
+QUADRATIC_TIME_B = 5.62
+TIMEOUT_SAFETY_FACTOR = 2.0
 BASE_OVERHEAD_S = 120
 
 
@@ -48,7 +56,9 @@ def run_one(num_frames, rep_idx):
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = ""
 
-    timeout_s = BASE_OVERHEAD_S + num_frames * SECONDS_PER_FRAME_BUDGET
+    predicted_inference_s = (QUADRATIC_TIME_A * num_frames ** 2
+                              + QUADRATIC_TIME_B * num_frames)
+    timeout_s = int(BASE_OVERHEAD_S + predicted_inference_s * TIMEOUT_SAFETY_FACTOR)
     t0 = time.time()
     print(f"[{time.strftime('%H:%M:%S')}] START {run_id} (timeout={timeout_s}s)", flush=True)
 
@@ -103,9 +113,26 @@ def run_one(num_frames, rep_idx):
 
 
 def main():
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument(
+        "--only", type=str, default=None,
+        help="Comma-separated num_frames:reps to run instead of the full TIERS "
+             "list, e.g. '200:3' -- for resuming a single tier after fixing a bug "
+             "without re-running tiers that already completed cleanly.",
+    )
+    args = p.parse_args()
+
+    tiers = TIERS
+    if args.only:
+        tiers = []
+        for chunk in args.only.split(","):
+            n_str, reps_str = chunk.split(":")
+            tiers.append((int(n_str), int(reps_str)))
+
     os.makedirs(JSON_DIR, exist_ok=True)
     os.makedirs(CSV_DIR, exist_ok=True)
-    for num_frames, reps in TIERS:
+    for num_frames, reps in tiers:
         for rep_idx in range(1, reps + 1):
             run_one(num_frames, rep_idx)
             time.sleep(5)  # let the system settle between fresh processes
