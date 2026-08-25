@@ -26,7 +26,7 @@ RGB camera → LingBot-Map → depth + pose estimados → point cloud, tratando 
 
 **Actualización 2026-08-24 — DOS líneas paralelas e independientes investigando la misma pregunta, en máquinas distintas, fusionadas en este documento (no se descarta ninguna de las dos):**
 
-1. **Máquina Linux nueva** (esta sesión): "Campaña de caracterización secuencial" — GPU disponible pero **CPU forzada deliberadamente** para preservar el baseline FP32 exacto. Fases N=10 y N=25 completadas (5/5 y 5/5 éxito). Ver sección "Campaña de caracterización secuencial (nueva máquina Linux)" más abajo.
+1. **Máquina Linux nueva** (esta sesión): "Campaña de caracterización secuencial" — GPU disponible pero **CPU forzada deliberadamente** para preservar el baseline FP32 exacto. **COMPLETA: 5 fases (N=10/25/50/100/200), 21 corridas, 0 fallos de pipeline.** Conclusión: memoria NO acumula (satura, ΔRAM/frame decreciente monótono 329.5→66.8 MB/frame), tiempo/frame crece pero se frena marcadamente pasado N≈100 (coherente con `kv_cache_sliding_window=64`). Ver sección "Reporte final de la campaña de caracterización secuencial" más abajo para el detalle completo, incluida la tabla de las 5 fases y las limitaciones explícitas.
 2. **Máquina Windows original** (sesión paralela, documentada arriba en todo el resto del archivo): "Campaña de secuencia larga" — primera corrida real de reconocimiento completada (20 frames, éxito), tras recalibrar el umbral de seguridad del monitor externo (bajado a 15MB — el margen normal de este baseline en esa máquina ya es de pocos cientos de MB). Dato único: 148.89s/frame promedio, ΔRAM/frame=250.7MB. Ver sección "Campaña de secuencia larga: estabilidad de memoria en `inference_streaming`" más abajo.
 
 **Ambas atacan la misma pregunta (¿memoria estable o acumulativa al crecer la secuencia?) con el mismo dataset (`example/courthouse`) y el mismo baseline, pero en hardware muy distinto — tratarlas como dos fuentes de evidencia independientes, no fusionar sus números.** La máquina Windows es ~20× más lenta por frame en esta comparación preliminar (148.89s/frame vs ~6-8s/frame en Linux) y opera con márgenes de RAM mucho más ajustados — buen caso para eventualmente comparar si la tendencia (constante/creciente/etc.) es la misma en ambas o si es un artefacto de una máquina específica. **No editar ninguna de las dos secciones de campaña como si fuera la otra — son corridas y datos reales de máquinas distintas.**
@@ -822,7 +822,69 @@ Corridas: `results/json/n100_rep{1..3}.json`. Mismo dataset y metodología (prim
 
 **Fix aplicado a `scripts_seq/run_campaign.py` (script de instrumentación, no toca `demo.py`/`lingbot_map`):** la fórmula de timeout se reemplazó por un modelo cuadrático ajustado empíricamente sobre las medias observadas de N=50 (502.9s) y N=100 (1449.2s) — `a=0.0887, b=5.62`, `timeout = 120 + (a·N² + b·N)·2` (margen de seguridad 2×). Validado contra los 4 puntos ya medidos: predice 65.1s/196s/503s/1449s para N=10/25/50/100 (coincide con lo observado), y da **157.7 min de margen para N=200** (vs los 52 min insuficientes de antes). Se agregó también un flag `--only "200:3"` al driver para poder reintentar solo el tier faltante sin re-correr N=10/25/50/100, que ya habían completado limpiamente. `n200_rep2` también quedó registrado como fallo (`exit_reason=no_output_file`) porque se interrumpió manualmente a los 53s al detener el driver viejo para aplicar el fix — irrelevante para el análisis (no llegó a cargar el modelo).
 
-**Estado: Fases N=10, N=25, N=50 y N=100 completas (5/5, 5/5, 5/5 y 3/3 éxito, 0 fallos "reales" de pipeline en 18 corridas — el único fallo de N=200 fue del presupuesto de tiempo del driver, ya corregido). Fase N=200 (3 reps) reiniciada con el timeout corregido, en ejecución en background al momento de escribir esto.**
+### Resultados — Fase 5 (final): N=200, 3 repeticiones (2026-08-24)
+
+Corridas: `results/json/n200_rep{1..3}.json` (con el timeout corregido). Mismo dataset y metodología (primeros 200 de los 286 frames de `example/courthouse` — no se agota la secuencia completa, queda margen).
+
+| Métrica | Media | Mediana | Desv. estándar | Mín | Máx | Rango |
+|---|---|---|---|---|---|---|
+| Tiempo de carga del modelo (s) | 6.240 | 6.130 | 0.191 | 6.130 | 6.460 | 0.330 |
+| Tiempo de inferencia, 200 frames (s) | 3368.093 | 3373.930 | 36.853 | 3328.670 | 3401.680 | 73.010 |
+| Tiempo por frame (s) | 16.841 | 16.870 | 0.184 | 16.643 | 17.008 | 0.365 |
+| Tiempo total de la corrida (s) | 3376.670 | 3382.450 | 36.693 | 3337.430 | 3410.130 | 72.700 |
+| RSS pico (MB) | 20169.7 | 20132.2 | 155.2 | 20036.7 | 20340.2 | 303.5 |
+| RSS tras cargar el modelo (MB) | 5880.2 | 5877.7 | 19.5 | 5862.0 | 5900.8 | 38.8 |
+| RSS final, tras inferencia (MB) | 19239.8 | 19202.3 | 155.1 | 19106.9 | 19410.3 | 303.4 |
+| RAM libre mínima del sistema (MB) | 6627.6 | 6638.2 | 147.7 | 6474.9 | 6769.7 | 294.8 |
+| **ΔRAM/frame (MB/frame)** | **66.8** | 66.5 | 0.8 | 66.2 | 67.7 | 1.4 |
+
+**Tasa de fallos: 0/3 (0%)** (sin contar el fallo de timeout del driver ya documentado y corregido arriba, que no fue un fallo del pipeline). Variabilidad entre repeticiones muy baja (coeficientes de variación de tiempo/frame y ΔRAM/frame ambos ~1%) — el resultado es reproducible, no es un dato suelto.
+
+## Reporte final de la campaña de caracterización secuencial (5 fases, 21 corridas, 0 fallos de pipeline) — 2026-08-24
+
+### Tabla completa N=10→25→50→100→200
+
+| N | Tiempo/frame (s) | %cambio | ΔRAM/frame (MB) | %cambio | RSS pico (MB) | RSS final (MB) | Tiempo total corrida (s) |
+|---|---|---|---|---|---|---|---|
+| 10 | 6.322 | — | 329.5 | — | 9568.1 | 8711.4 | 70.7 |
+| 25 | 7.609 | +20.4% | 245.6 | -25.5% | 11762.8 | 11612.2 | 197.7 |
+| 50 | 10.059 | +32.2% | 198.3 | -19.3% | 15745.8 | 15430.3 | 510.8 |
+| 100 | 14.492 | +44.1% | 134.3 | -32.3% | 20026.8 | 19101.7 | 1457.7 |
+| 200 | 16.841 | **+16.2%** | 66.8 | **-50.3%** | 20169.7 | 19239.8 | 3376.7 |
+
+**El punto de inflexión en N=100→200 es la observación central de toda la campaña.** El % de cambio en tiempo/frame venía *acelerando* (+20.4%, +32.2%, +44.1%) hasta N=100 — pero en el salto a N=200 **se frena bruscamente a +16.2%**, el incremento porcentual más bajo de toda la serie. En paralelo, el RSS final entre N=100 y N=200 casi no se mueve (19101.7→19239.8MB, apenas +138MB pese a **duplicar** los frames) — muy distinto de los saltos de ~2-4GB entre fases anteriores.
+
+**Explicación mecánica, no solo estadística:** todas las corridas de esta campaña usan `kv_cache_sliding_window=64` (el mismo default que usa `demo.py`, ver `scripts_seq/run_single.py`). Con `num_scale_frames=8`, el caché KV se llena por completo alrededor del frame ~72 (8 de escala + 64 de ventana). N=10/25/50 están todos por debajo de ese umbral — el contexto atendido todavía está creciendo con cada frame nuevo, consistente con el tiempo/frame acelerando. N=100 cruza el umbral a mitad de camino (crece hasta el tope y luego empieza a desalojar frames viejos del caché) — todavía muestra el mayor salto porcentual, coherente con estar en la transición. N=200 corre casi enteramente con el caché ya en régimen de ventana deslizante (frames viejos descartados) — el contexto efectivo de atención deja de crecer con N, y el costo por frame dejó de acelerar. Esto es exactamente el comportamiento que `kv_cache_sliding_window` está diseñado para producir: memoria y cómputo acotados independientemente de cuán larga sea la secuencia, una vez superada la ventana.
+
+### Clasificación de las relaciones pedidas
+
+| Relación | Clasificación | Evidencia |
+|---|---|---|
+| RAM pico vs. n_frames | **Creciente, pero con crecimiento decreciente (cóncava, saturando)** — no lineal, no indefinida | +23%, +34%, +27%, +0.7% entre fases sucesivas — el último salto (N=100→200) es casi plano |
+| RAM final vs. n_frames | **Creciente y saturando, prácticamente meseta entre N=100 y N=200** | +33%, +33%, +24%, **+0.7%** entre fases sucesivas |
+| Tiempo total vs. n_frames | **Sub-cuadrático, con desaceleración clara en el último tramo** — no lineal simple tampoco | Un modelo cuadrático ajustado a N=50/100 sobreestimó N=200 en ~27% (predijo ~4672s, real 3368s) |
+| Tiempo/frame vs. n_frames | **Creciente con techo — acelerado hasta N≈100, luego desacelerando fuerte** | +20.4%→+32.2%→+44.1%→**+16.2%** |
+
+Ninguna de las cuatro relaciones es "aproximadamente constante" en sentido estricto sobre todo el rango 10-200, pero **ninguna es tampoco un crecimiento no acotado** — el patrón dominante en las cuatro es **saturación**, coherente con un mecanismo de ventana deslizante que acota el contexto efectivo.
+
+### Respuesta a las dos preguntas centrales de la campaña
+
+**1. "¿LingBot-Map mantiene un consumo de memoria aproximadamente estable al procesar secuencias largas, o acumula memoria a medida que aumenta el número de frames?"**
+
+**No acumula — la evidencia apunta consistentemente a memoria acotada/saturante, no a una fuga ni a un crecimiento sin límite.** ΔRAM/frame decrece de forma monótona y estadísticamente consistente en las 5 fases (329.5→245.6→198.3→134.3→66.8 MB/frame, coeficientes de variación entre repeticiones <9% en todas las fases, tan bajos como ~1% en N=50/100/200), y el RSS final prácticamente deja de crecer entre N=100 y N=200 (+138MB al duplicar la secuencia, tras haber crecido ~4-5GB en cada duplicación anterior). Esto cumple el criterio de conclusión pedido: repeticiones consistentes (sí, variabilidad cuantificada y baja), sin tendencia de crecimiento con N (al contrario, tendencia clara de *desaceleración/saturación*), sin fallos asociados al aumento de longitud (0/21 fallos de pipeline). La explicación mecánica (`kv_cache_sliding_window=64`) es coherente con el patrón observado, no es solo un ajuste post-hoc a los números.
+
+**2. "¿El tiempo de procesamiento por frame permanece aproximadamente constante o aumenta con la longitud de la secuencia?"**
+
+**Aumenta, pero no de forma indefinida — aumenta mientras el caché KV se está llenando (aproximadamente hasta N≈70-100) y luego el aumento se frena marcadamente una vez la ventana deslizante entra en régimen estable.** No es "aproximadamente constante" en el sentido simple de la pregunta (hay un aumento real de 6.3s/frame a 16.8s/frame, 2.7× entre N=10 y N=200), pero tampoco es un crecimiento no acotado o cuadrático puro — el propio dato de N=200 refuta esa hipótesis más simple, que sí parecía sostenerse con los primeros 4 puntos (N=10-100). La respuesta correcta y honesta es de dos regímenes: creciente-acelerado por debajo del tamaño de ventana efectivo, luego creciente-desacelerado (aproximándose a una meseta) por encima.
+
+### Limitaciones explícitas de esta conclusión
+
+- Solo se probó hasta N=200 (de 286 frames disponibles en `courthouse`) — no se confirmó que el tiempo/frame efectivamente se estabilice en una constante verdadera más allá de N=200; el dato disponible solo muestra la *desaceleración*, no un plateau completo. N=300+ (excediendo el propio dataset, requeriría otra secuencia o repetir frames) sería necesario para confirmar un techo real.
+- `keyframe_interval=1` en todas las corridas (cada frame es keyframe) — el comportamiento con `keyframe_interval>1` (que `demo.py` auto-selecciona para secuencias >320 frames) no fue probado en esta campaña y podría cambiar la dinámica de saturación observada.
+- Los valores absolutos (tiempos, MB) son específicos de esta máquina Linux (20 núcleos, 30GB RAM, CPU forzada) — no comparables directamente con la máquina Windows original ni generalizables a hardware embarcado sin repetir la campaña ahí. La *forma* de las curvas (saturación en vez de crecimiento indefinido) es la conclusión más transferible, no los números exactos.
+- No se validó la calidad geométrica de las predicciones en secuencias largas (drift de pose, degradación de profundidad) — esta campaña midió solo memoria y tiempo, tal como se pidió explícitamente, sin optimizaciones ni cambios de modelo.
+
+**Estado: Campaña de caracterización secuencial (máquina Linux) — COMPLETA. 5 fases (N=10/25/50/100/200), 21 corridas, 0 fallos de pipeline (1 fallo de timeout del driver, documentado y corregido, no del pipeline). Las dos preguntas centrales quedan respondidas con evidencia cuantitativa y una explicación mecánica coherente (`kv_cache_sliding_window=64`).**
 
 ## Campaña de secuencia larga: estabilidad de memoria en `inference_streaming` (2026-08-24, EN PROGRESO)
 
@@ -947,10 +1009,10 @@ La profundidad monocular tiene ambigüedad de escala — no asumir que es una me
 4. ~~Medir RAM pico durante carga e inferencia~~ — hecho exhaustivamente: crash inicial diagnosticado (APPCRASH en `c10.dll`), causa raíz localizada en `load_model()`, pico reducido de 16.1GB a 13.1GB con `mmap=True`+`del/gc.collect()` (ambos ya aplicados a `demo.py`).
 5. ~~Evaluar reducción de precisión~~ — FP16 y INT8 dinámico probados y descartados para esta CPU (ver "Estado actual"); ninguno se aplicó a producción.
 6. ~~Primer análisis de redundancia temporal entre frames~~ — hecho con las 10 imágenes existentes, análisis de imagen puro; resultado: baja redundancia en esta muestra (ver sección correspondiente).
-7. ~~Campaña de caracterización secuencial, Fase 1 (N=10, 5 repeticiones)~~ — hecha en la máquina Linux nueva (ver sección "Campaña de caracterización secuencial" arriba), 0 fallos, datos limpios. **La pregunta de acumulación de memoria sigue sin respuesta** — necesita N=25/50/100/200 para comparar tendencia.
+7. ~~Campaña de caracterización secuencial, las 5 fases (N=10/25/50/100/200)~~ — **COMPLETA** en la máquina Linux nueva (ver "Reporte final de la campaña de caracterización secuencial" arriba), 21 corridas, 0 fallos de pipeline. Las dos preguntas centrales (¿acumula memoria? ¿tiempo/frame constante?) quedaron respondidas: memoria satura (no acumula), tiempo/frame acelera hasta N≈100 y luego se frena, coherente con `kv_cache_sliding_window=64`.
 
 **Pendiente, sin iniciar (requiere decisión del usuario antes de arrancar):**
-- Campaña de caracterización secuencial, Fases N=25/50/100/200 — script y umbral de seguridad ya listos (`scripts_seq/run_single.py`), solo falta ejecutar las repeticiones restantes.
+- Confirmar el plateau de tiempo/frame más allá de N=200 (requeriría otra secuencia más larga que las 286 imágenes de `courthouse`, o `keyframe_interval>1`) — limitación explícita documentada en el reporte final, no crítica.
 - Campaña controlada de ≥10 repeticiones sobre el baseline actual optimizado (diseño completo ya documentado arriba, en la sección del reporte de crash original — adaptar al baseline con mmap+gc antes de correr, ya que fue diseñada contra el baseline sin optimizar). Esta es la campaña de **la máquina Windows**, distinta de la campaña secuencial de arriba.
 - Repetir el análisis de redundancia de frames con secuencias más largas/variadas (robot detenido, giro lento, avance rápido) antes de construir un detector de cambios real.
 - Crear rama git separada en este repo para una eventual versión "lightweight" (`git checkout -b lightweight`), dejando `main` como espejo del upstream intacto — no creada todavía, todo el trabajo hasta ahora vive en `main` como scripts de diagnóstico, sin tocar `lingbot_map/` ni la arquitectura.
