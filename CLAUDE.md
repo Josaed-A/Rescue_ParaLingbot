@@ -31,7 +31,9 @@ RGB camera → LingBot-Map → depth + pose estimados → point cloud, tratando 
 
 **Ambas atacan la misma pregunta (¿memoria estable o acumulativa al crecer la secuencia?) con el mismo dataset (`example/courthouse`) y el mismo baseline, pero en hardware muy distinto — tratarlas como dos fuentes de evidencia independientes, no fusionar sus números.** La máquina Windows es ~20× más lenta por frame en esta comparación preliminar (148.89s/frame vs ~6-8s/frame en Linux) y opera con márgenes de RAM mucho más ajustados — buen caso para eventualmente comparar si la tendencia (constante/creciente/etc.) es la misma en ambas o si es un artefacto de una máquina específica. **No editar ninguna de las dos secciones de campaña como si fuera la otra — son corridas y datos reales de máquinas distintas.**
 
-**Pendiente de decisión del usuario:** continuar la campaña secuencial en Linux con N=50/100/200 (en curso al momento de este merge, ver sección nueva), decidir el alcance real de la campaña en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o abrir una nueva línea de investigación.
+**Actualización 2026-08-25 — Baseline GPU real (Linux/NVIDIA) medido, distinto de la campaña CPU-forzada de arriba:** con GPU real (NVIDIA RTX 2000 Ada, 8GB VRAM, capability 8.9, `demo.py` castea el aggregator a bf16 automáticamente sin tocar nada), el baseline de 200 frames sin modificar **NO es alcanzable — OOM real y reproducible en el frame 35/200**, muy por debajo del punto donde `kv_cache_sliding_window=64` llegaría a saturar la memoria (ese mecanismo nunca llega a activarse; el techo de VRAM de esta GPU llega primero). Inferencia en sí ~25× más rápida que CPU (~0.25s/frame vs ~6.3s/frame). Ver sección "Baseline GPU real (Linux/NVIDIA)" más abajo para el detalle completo (progresión de VRAM por frame, dos regímenes de crecimiento, utilización/temperatura/potencia de GPU). Además, análisis (sin implementar) de qué haría falta para alimentar `demo.py` con una webcam en vivo — ver sección "Análisis de interfaz para webcam RGB en vivo" inmediatamente después: el código actual de `--video_path` no sirve para un dispositivo en vivo (tres problemas concretos identificados), pero el modelo ya expone la primitiva de streaming por-frame necesaria (`GCTStream.forward(..., causal_inference=True)`) sin necesidad de tocar `lingbot_map`.
+
+**Pendiente de decisión del usuario:** implementar el driver de captura de webcam en vivo (análisis ya hecho, nada implementado todavía), decidir si mitigar el techo de VRAM de la GPU antes de ese experimento (dado que a ~4 FPS el mismo OOM se alcanzaría en ~9 segundos de captura continua), continuar la campaña secuencial en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o recién ahí empezar la integración/optimización con Paragraphica.
 
 ## Estado del diagnóstico (ya hecho, no repetir)
 - Máquina: Windows, AMD Ryzen 5 3500U (4 cores/8 threads), **sin GPU NVIDIA/CUDA**, gráficos integrados Vega.
@@ -938,6 +940,129 @@ Los primeros frames individuales (9-13) rondan 120-176s; los últimos (14-20) ro
 **Esta única corrida de 20 frames NO forma parte del diseño formal (10/25/50/100/200)** — fue reconocimiento para calibrar el umbral de seguridad y obtener un dato real de tiempo antes de comprometerse al diseño completo. Con ~50 min para una sola corrida de 20 frames, y una tendencia de tiempo-por-frame que no es plana, el presupuesto de tiempo real de las 21 corridas propuestas (10×5, 25×5, 50×5, 100×3, 200×3) es sustancialmente mayor a lo estimado originalmente — plausgalmente muchas horas a días de ejecución continua, sobre todo en los tiers de 50/100/200 frames si el crecimiento por frame se sostiene.
 
 **Pendiente, sin iniciar:** las 21 corridas formales del diseño (o el subconjunto reducido que el usuario decida usando su propia cláusula de contingencia ya expresada: priorizar 10/25/50 con repeticiones completas, usar 100/200 solo para confirmar tendencia con menos repeticiones, documentando explícitamente cualquier reducción). Análisis estadístico completo (media/mediana/desviación/mín/máx/tasa de fallos por tier, ΔRAM/frame vs n_frames, tiempo/frame vs n_frames, clasificación constante/lineal/no-lineal) pendiente de tener múltiples corridas por tier — no se puede hacer con n=1.
+
+## Baseline GPU real (Linux/NVIDIA) — antes de cualquier optimización/integración con Paragraphica (2026-08-25)
+
+**Distinto a todo lo anterior: primera medición con GPU real (no CPU forzada).** La campaña de caracterización secuencial (sección arriba) forzó CPU deliberadamente para preservar el baseline FP32 y comparar contra la máquina Windows. Esta sección es la contraparte: **el baseline de rendimiento tal cual corre `demo.py` sin ningún override**, en esta misma máquina Linux, dejando que use la GPU disponible y todo lo que eso implica (incluido el cast automático a bf16 del aggregator que hace el propio `demo.py`, sin tocar ni un parámetro). Motivación: establecer este baseline antes de empezar cualquier modificación para Paragraphica, según lo pedido explícitamente. **No se repitió la campaña 10→200** (ya确ada arriba, memoria satura, sin fallos) — esto es una medición nueva y distinta: un baseline GPU detallado.
+
+### Hardware confirmado (tras el reinicio de la máquina)
+
+`nvidia-smi` había fallado al inicio de esta sesión (mismatch de versión de driver/NVML); tras el reinicio necesario para el apagado solicitado anteriormente, quedó funcional:
+- **GPU:** NVIDIA RTX 2000 Ada Generation Laptop GPU, **8188 MiB VRAM totales** (~8GB), compute capability **8.9** (Ada Lovelace).
+- Con capability≥8, `demo.py` selecciona automáticamente `dtype = torch.bfloat16` para el aggregator (líneas 462-474, código sin tocar) — cabezas (`camera_head`, `depth_head`) se mantienen en FP32 por diseño de los autores (ya documentado en la sección de FP16 más arriba, para CPU).
+
+### Instrumentación nueva: `scripts_gpu/` (RAM+VRAM+GPU, no reemplaza `scripts_seq/`)
+
+- **[scripts_gpu/monitor_gpu.py](scripts_gpu/monitor_gpu.py):** extiende el monitor de la campaña secuencial (RSS/USS/RAM libre vía `psutil`) agregando VRAM y métricas de GPU vía `pynvml` (NVML directo, sin overhead de invocar `nvidia-smi` por subproceso en cada muestra): `torch.cuda.memory_allocated/reserved` (preciso por-proceso) + `nvidia-smi`-equivalente vía NVML (`memory.used/free`, `utilization.gpu`, `temperature.gpu`, `power.draw`) — todo en un hilo de fondo a intervalos fijos (0.2-0.3s), igual que en la campaña CPU. **Umbral de seguridad nuevo: VRAM libre**, además del ya existente de RAM libre — necesario porque, a diferencia de la RAM (30GB en esta máquina, nunca en riesgo), la VRAM de 8GB sí es un límite real y cercano, como confirmó el primer intento (ver abajo).
+- **[scripts_gpu/run_gpu_baseline.py](scripts_gpu/run_gpu_baseline.py):** reutiliza `demo.load_model()`/`demo.load_images()` **sin modificar**, y replica textualmente la lógica de selección de dispositivo/dtype/cast del aggregator de `demo.py::main()` (mismas líneas, no reinterpretadas) — así "el baseline" medido es exactamente lo que correría `python demo.py` en esta máquina, no una variante. Mismos flags documentados en toda la investigación (`use_sdpa=True`, `camera_num_iterations=1`, `kv_cache_sliding_window=64`, `num_scale_frames=8`, `image_size=518`, `keyframe_interval` auto=1 para N≤320). Se agregó un parche de `tqdm.update()` (solo en este script, no toca `lingbot_map`) para timestampear cada frame individual del loop de streaming contra el reloj del monitor — permite correlacionar memoria con número de frame exacto, no solo con tiempo transcurrido.
+
+### Pruebas de humo — encontraron el problema central antes de comprometerse a 200 frames
+
+- **N=10: éxito limpio.** `dtype=torch.bfloat16` confirmado, carga 9.1s, inferencia 10 frames en 2.495s (**0.25s/frame, ~4 FPS efectivo — ≈25× más rápido que CPU** en la campaña anterior, ~6.3s/frame). Pero VRAM pico ya en 6922MB de 8187MB totales (84.6%), con solo 1.66GB libres — señal de alerta.
+- **N=50: el propio umbral de seguridad de VRAM se disparó** (`vram_safety_threshold_breached`, RAM libre de VRAM cayó a 225MB) antes de completar — el monitor abortó limpiamente vía `os._exit()`, sin crash real, pero **confirmó que la VRAM no se comporta como la RAM en CPU: no muestra señales de saturar**, sigue subiendo agresivamente.
+
+**Decisión consultada con el usuario:** en vez de aceptar un N menor como "el baseline detallado" o mantener el margen de seguridad conservador, se bajó el umbral de VRAM casi a cero (30MB) para **dejar que ocurra el OOM real** — es una excepción de PyTorch normal y capturable (`torch.OutOfMemoryError`), no un crash de sistema como el `APPCRASH` de `c10.dll` documentado en la máquina Windows — así que dejarlo fallar de verdad es seguro y da el dato más preciso (el techo real, no una aproximación conservadora).
+
+### Resultado: OOM real, reproducible, en el frame 35 de 200 (2026-08-25)
+
+Corrida real apuntando a N=200 (`results_gpu/json/gpu_baseline_n200.json`), **reproducido dos veces en el mismo punto exacto** (primera corrida antes de un fix menor al script para no perder los snapshots parciales en caso de excepción; segunda corrida, limpia, usada para los números de abajo):
+
+```
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 38.00 MiB.
+GPU 0 has a total capacity of 7.62 GiB of which 14.62 MiB is free.
+this process has 7.59 GiB memory in use (7.16 GiB allocated by PyTorch, 309.35 MiB reserved but unallocated)
+```
+
+Traceback: la excepción ocurre en `lingbot_map/heads/dpt_head.py::_apply_pos_embed` → `lingbot_map/heads/utils.py::make_sincos_pos_embed` (una asignación pequeña, 38MB, de la cabeza de profundidad) — **no es un pico puntual de una operación grande, es la consecuencia de haber agotado la VRAM gradualmente en los frames anteriores.** Excepción de Python normal, capturada limpiamente por el script (no crasheó el proceso ni el driver — confirmado con `nvidia-smi` inmediatamente después, GPU vuelta a estado idle, 14MiB en uso).
+
+**Progresión de carga (snapshots discretos, corrida limpia):**
+
+| Etapa | t (s) | RSS proceso (MB) | VRAM alloc (MB) | VRAM reserved (MB) | VRAM NVML usada (MB) |
+|---|---|---|---|---|---|
+| Inicio | 0.01 | 731.4 | 0.0 | 0.0 | 415.5 |
+| Imágenes cargadas (200) | 0.93 | 1247.3 | 0.0 | 0.0 | 415.5 |
+| Checkpoint cargado (`load_model`) | 8.56 | 1630.8 | 4631.8 | 4643.1 | 5162.5 |
+| Imágenes movidas a GPU | 8.65 | 1277.3 | 3179.1 | 4643.1 | 5175.1 |
+
+Tiempo de carga del modelo: **7.618s** (más rápido que en CPU con `mmap`, ~90-110s en la máquina Windows / ~6.2s en CPU de esta misma máquina Linux — comparable, la carga en sí no es GPU-bound).
+
+**Progresión de VRAM por frame durante el streaming (vía el parche de `tqdm`, 27 frames individuales capturados, frames 9-35):**
+
+| Rango de frames | ΔVRAM/frame | Patrón |
+|---|---|---|
+| 9 → 25 (17 frames) | **~2.1 MB/frame** | Crecimiento lento y suave, casi plano |
+| 26 → 35 (9 frames, hasta el crash) | **~65-212 MB/frame** (irregular, picos de hasta +211.8MB en un solo frame) | Aceleración brusca, muy por encima del régimen anterior |
+
+**Esto es la observación central de esta sección.** El `kv_cache_sliding_window=64` que explicó la saturación de RAM en la campaña CPU (memoria acotada una vez el caché se llena, ver reporte final arriba) **nunca llega a activarse aquí** — la ventana tiene 64 frames de capacidad, pero la GPU se queda sin VRAM en el frame ~35, **antes de que el mecanismo de acotamiento del propio modelo tenga oportunidad de actuar.** Es un hallazgo distinto y complementario al de la campaña CPU, no una repetición: en CPU (30GB de margen) el techo de memoria nunca fue el factor limitante y se pudo observar la saturación completa; en esta GPU de 8GB, el techo de hardware llega primero.
+
+**Hipótesis no confirmada sobre el cambio de régimen en el frame ~26** (no investigada a fondo — está fuera de alcance según lo pedido, "no comiences ninguna optimización todavía"): el mensaje de error de PyTorch menciona explícitamente `"309.35 MiB is reserved by PyTorch but unallocated"` y sugiere `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` — consistente con fragmentación del *allocator* cacheado de PyTorch, posiblemente por el patrón de concatenación incremental del KV-cache (cada frame nuevo requiere un tensor más grande que el anterior, y mientras el cache crece hacia el tamaño de la ventana de 64, cada `torch.cat` transitorio necesita tanto la versión vieja como la nueva en memoria a la vez). No confirmado con instrumentación adicional — queda como hipótesis para una eventual fase de optimización, no como diagnóstico cerrado.
+
+**Utilización de GPU, temperatura y potencia (picos de toda la corrida, vía NVML):**
+
+| Métrica | Valor |
+|---|---|
+| Utilización GPU pico | **100%** (sostenido durante toda la fase de streaming) |
+| Temperatura GPU pico | **54°C** |
+| Potencia GPU pico | **40.4W** (GPU de laptop, limitada por diseño — el `nvidia-smi` inicial mostró un cap de 40W) |
+| RAM (proceso) pico | 9621.5 MB — similar al pico de RAM en CPU para N pequeños de la campaña anterior, coherente (mismo `load_model()`, mismo mmap del checkpoint en RAM antes de mover a GPU) |
+| RAM libre mínima del sistema | 20220.6 MB — sin riesgo, esta máquina tiene 30GB |
+| Errores/warnings capturados | Solo el `torch.OutOfMemoryError` final; ningún warning adicional durante la ejecución (el warning benigno de `scipy`/`Failed to load pretrained weights` ya documentados arriba siguen apareciendo, no son nuevos) |
+
+### Conclusión de esta sección
+
+**El baseline de 200 frames tal cual, sin modificar nada, NO es alcanzable en esta GPU de 8GB — el techo real medido es 35 de 200 frames (17.5% de la secuencia objetivo).** Esto no es un fallo del pipeline ni de la metodología: es el resultado correcto y esperado de medir el baseline honestamente, tal como se pidió. Confirma que, para esta GPU específica, la memoria de VRAM (no la de RAM del sistema, que sigue con margen enorme) es el recurso limitante real, y que el mecanismo de `kv_cache_sliding_window` que protege la RAM en CPU no alcanza a proteger la VRAM en este hardware porque el límite físico llega primero. **Ninguna optimización se aplicó ni se investigó a fondo** (tal como se pidió) — este resultado queda como el punto de partida cuantitativo para cualquier trabajo futuro de reducción de memoria en GPU, no como un problema ya resuelto.
+
+**Limitaciones explícitas:** una sola corrida detallada (no una campaña con repeticiones — apropiado para esta medición exploratoria de "dónde está el techo", distinto del objetivo estadístico de la campaña CPU; el punto de crash sí se reprodujo idéntico en dos corridas, dando algo de confianza en que no es ruido). La hipótesis sobre fragmentación del allocator como causa del cambio de régimen en el frame ~26 no está confirmada. No se probó con `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (ya lo activa `demo.py` en la línea 38 salvo que se pase `--compile`, así que en rigor **ya estaba activo** en esta corrida — el mensaje de error de PyTorch lo sugiere de todos modos porque es un mensaje genérico, no específico a si ya está activado o no; no se profundizó en si ayudaría más allá de lo que ya hace).
+
+## Análisis de interfaz para webcam RGB en vivo — solo análisis, nada implementado (2026-08-25)
+
+**Pedido explícito:** antes de tocar Paragraphica, preparar el análisis (sin ejecutar el experimento todavía) de qué necesitaría `demo.py` para recibir un stream RGB de una webcam convencional en vez de una carpeta de imágenes o un archivo de video. Investigación de código + una prueba mínima de apertura de cámara (read-only, no se integró nada al pipeline).
+
+### Hardware disponible en esta máquina (confirmado, no asumido)
+
+`/dev/video0` y `/dev/video1` existen. Prueba directa con OpenCV:
+```python
+cap = cv2.VideoCapture(0, cv2.CAP_V4L2)   # opened: True
+# 640x480 @ 30fps, cap.read() devuelve un frame real (480, 640, 3)
+```
+Cámara real y funcional en esta máquina — no hace falta hardware adicional para el próximo experimento.
+
+### Por qué el `--video_path` actual de `demo.py` NO sirve tal cual para una cámara en vivo
+
+`load_images()` (`demo.py:57-130`) tiene una rama para `video_path` que:
+```python
+cap = cv2.VideoCapture(video_path)                       # (1)
+total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))     # (2)
+while True:
+    ret, frame = cap.read()
+    if not ret: break                                     # (3)
+    ...guarda cada frame como .jpg en disco...
+```
+Tres problemas concretos, confirmados empíricamente (no solo por lectura de código):
+
+1. **`cv2.VideoCapture(video_path)` con `video_path` como `str`** (así está tipado el argumento `--video_path` en el CLI) funciona para archivos de video, pero no es la forma confiable de abrir un dispositivo en vivo — hace falta un **índice entero** (`cv2.VideoCapture(0, cv2.CAP_V4L2)`), no un string. Pasar `"/dev/video0"` como string es dependiente del backend y no confiable.
+2. **`cap.get(cv2.CAP_PROP_FRAME_COUNT)` devuelve `-1` para una cámara en vivo** (confirmado arriba, no supuesto) — no hay un "total de frames" para un stream sin fin, rompe la barra de progreso `tqdm(total=total_frames, ...)` (que recibiría `total=-1`).
+3. **El bucle `while True: ...; if not ret: break` no tiene condición de salida natural para una cámara** — un archivo de video eventualmente devuelve `ret=False` al llegar al final; una cámara en vivo nunca deja de mandar frames en operación normal, así que **este código quedaría colgado indefinidamente**, nunca llegaría a la fase de inferencia.
+
+Más allá de estos tres bugs puntuales, el diseño completo de esta rama es **"extraer todos los frames a disco primero, inferir después"** (pensado para video offline) — incompatible de raíz con un flujo en vivo real (capturar → inferir → mostrar, frame por frame, sin un total conocido de antemano).
+
+### Lo que SÍ existe y se puede reutilizar sin tocar `lingbot_map` ni `demo.py`
+
+- **`GCTStream.forward(frame_tensor, num_frame_for_scale=scale_frames, num_frame_per_block=1, causal_inference=True)`** (`lingbot_map/models/gct_stream.py:480-485`) — el modelo YA tiene una primitiva de streaming por-frame-individual con KV-cache persistente entre llamadas (es literalmente lo que usa `inference_streaming()` internamente en su Fase 2, frame por frame). **No hace falta modificar la arquitectura ni el modelo** para alimentar un frame a la vez — el hook ya existe.
+- **`load_and_preprocess_images()`** (`lingbot_map/utils/load_fn.py:104`) reutiliza el mismo crop/resize/alineado-a-`patch_size` que usa todo el pipeline — pero **requiere rutas de archivo** (`Image.open(image_path)`), no acepta un frame en memoria (numpy array de OpenCV) directamente. Reutilizable tal cual solo si cada frame capturado se escribe primero a un archivo temporal (ida y vuelta a disco por frame — funciona, pero no es ideal para tiempo real).
+
+### Lo que falta construir (en un script nuevo, no en `demo.py` ni `lingbot_map`, mismo patrón que toda la investigación hasta ahora)
+
+1. **Un driver de captura en vivo** — análogo a `demo.py` pero abre `cv2.VideoCapture(index, cv2.CAP_V4L2)` en vez de leer una carpeta/archivo.
+2. **Preprocesamiento por-frame** — o reutilizar `load_and_preprocess_images` vía archivo temporal (cero código nuevo de preprocesamiento, con costo de I/O de disco por frame), o escribir una versión mínima que opere directamente sobre el array en memoria replicando la misma lógica de crop/resize (más código, mejor para tiempo real de verdad). Ninguna de las dos implica tocar `lingbot_map`.
+3. **Reimplementar las dos fases de `inference_streaming()` pero alimentadas por la cámara**: Fase 1 — acumular `num_scale_frames=8` frames iniciales de la cámara y correr el forward de escala una vez; Fase 2 — por cada frame nuevo capturado, `model.forward(..., causal_inference=True)` como arriba.
+4. **Visualización en vivo** — el `PointCloudViewer` actual (`viser`) construye la escena de una vez a partir de un diccionario de predicciones ya completo (`read_data()`); no se investigó todavía si soporta actualización incremental frame-a-frame o si haría falta re-invocarlo/extenderlo. Sin resolver, marcado como pendiente explícito.
+
+### Implicación directa del hallazgo de VRAM de esta misma sesión (conectar, no ignorar)
+
+El baseline GPU de arriba mostró OOM real en el frame 35 (de 200) con esta misma configuración sin modificar. **Una cámara en vivo alimentando continuamente al modelo llegaría al mismo techo de VRAM en cuestión de segundos** (a ~4 FPS efectivos observados, frame 35 se alcanza en ~9 segundos de captura continua) — no es un problema exclusivo de "procesar 200 frames de un dataset", es un problema que el experimento de webcam va a encontrar de inmediato si se conecta tal cual al baseline sin modificar. Esto no bloquea preparar el análisis (ya hecho arriba), pero sí es información necesaria para cuando se decida *ejecutar* el experimento de webcam — probablemente necesite alguna mitigación de memoria (aunque sea mínima, como `output_device=cpu` para descargar predicciones ya procesadas) antes de poder correr de forma sostenida, no solo unos pocos segundos.
+
+**Nada de esto se implementó — es análisis puro, tal como se pidió.** No se tocó `demo.py`, no se tocó `lingbot_map`, no se empezó ningún trabajo de integración con Paragraphica.
 
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.

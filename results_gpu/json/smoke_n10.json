@@ -1,0 +1,106 @@
+{
+  "run_id": "smoke_n10",
+  "num_frames": 10,
+  "success": true,
+  "gpu_name": "NVIDIA RTX 2000 Ada Generation Laptop GPU",
+  "gpu_capability": [
+    8,
+    9
+  ],
+  "gpu_total_vram_mb": 8187.1,
+  "dtype": "torch.bfloat16",
+  "aggregator_cast_to_dtype": true,
+  "keyframe_interval_used": 1,
+  "model_load_time_s": 9.116,
+  "images_load_time_s": 0.058,
+  "inference_time_s": 2.495,
+  "per_frame_time_s": 0.2495,
+  "fps_effective": 4.0084,
+  "wall_time_s": 11.611,
+  "snapshot_start": {
+    "label": "start",
+    "t_s": 0.01,
+    "rss_mb": 729.6,
+    "uss_mb": 715.5,
+    "sys_avail_mb": 25767.8,
+    "vram_alloc_mb": 0.0,
+    "vram_reserved_mb": 0.0,
+    "vram_used_nvml_mb": 415.5
+  },
+  "snapshot_after_images": {
+    "label": "after_images",
+    "t_s": 0.13,
+    "rss_mb": 780.3,
+    "uss_mb": 765.9,
+    "sys_avail_mb": 25686.6,
+    "vram_alloc_mb": 0.0,
+    "vram_reserved_mb": 0.0,
+    "vram_used_nvml_mb": 415.5
+  },
+  "snapshot_after_load": {
+    "label": "after_load",
+    "t_s": 9.26,
+    "rss_mb": 1169.3,
+    "uss_mb": 1154.1,
+    "sys_avail_mb": 25129.8,
+    "vram_alloc_mb": 4631.8,
+    "vram_reserved_mb": 4643.1,
+    "vram_used_nvml_mb": 5162.5
+  },
+  "snapshot_after_images_to_device": {
+    "label": "after_images_to_device",
+    "t_s": 9.32,
+    "rss_mb": 1153.9,
+    "uss_mb": 1138.8,
+    "sys_avail_mb": 25126.9,
+    "vram_alloc_mb": 2831.9,
+    "vram_reserved_mb": 4643.1,
+    "vram_used_nvml_mb": 5175.1
+  },
+  "snapshot_final": {
+    "label": "final",
+    "t_s": 11.84,
+    "rss_mb": 1785.2,
+    "uss_mb": 1770.0,
+    "sys_avail_mb": 24664.4,
+    "vram_alloc_mb": 4009.0,
+    "vram_reserved_mb": 6369.1,
+    "vram_used_nvml_mb": 6924.1
+  },
+  "monitor_summary": {
+    "peak_rss_mb": 9819.0,
+    "peak_uss_mb": 10116.5,
+    "min_sys_avail_mb": 20918.0,
+    "peak_vram_alloc_mb": 5376.6,
+    "peak_vram_reserved_mb": 6367.0,
+    "peak_vram_used_nvml_mb": 6922.0,
+    "min_vram_free_nvml_mb": 1663.7,
+    "peak_gpu_util_pct": 100,
+    "peak_gpu_temp_c": 44,
+    "peak_gpu_power_w": 37.6,
+    "n_samples": 33,
+    "safety_aborted": false,
+    "abort_reason": null
+  },
+  "torch_cuda_max_memory_allocated_mb": 5922.2,
+  "torch_cuda_max_memory_reserved_mb": 6369.1,
+  "frame_events": [
+    [
+      11.6220862865448,
+      9
+    ],
+    [
+      11.754596471786499,
+      10
+    ]
+  ],
+  "warnings": [],
+  "prediction_keys": [
+    "pose_enc",
+    "depth",
+    "depth_conf",
+    "images",
+    "frame_type",
+    "is_keyframe"
+  ]
+}
