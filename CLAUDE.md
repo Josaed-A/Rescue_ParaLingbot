@@ -1166,6 +1166,55 @@ El baseline GPU de arriba mostró OOM real en el frame 35 (de 200) con esta mism
 
 **Nada de esto se implementó — es análisis puro, tal como se pidió.** No se tocó `demo.py`, no se tocó `lingbot_map`, no se empezó ningún trabajo de integración con Paragraphica.
 
+## Primera prueba con cámara real (webcam) — 400 frames reales, pipeline completo (2026-08-26)
+
+**Pasos 2 y 3 de la prioridad experimental del usuario:** implementar la interfaz de webcam (analizada, no implementada, en la sección anterior) y verificar el funcionamiento con cámara real. **Todavía no se tocó Paragraphica**, tal como se pidió explícitamente.
+
+### Diseño: capturar primero, procesar después (evita el problema de acoplar velocidad de cámara con velocidad de inferencia)
+
+En vez de implementar el loop de streaming en vivo (frame de cámara → inferencia → frame de cámara..., que con CPU a ~20-25s/frame haría la captura absurdamente lenta e irreal), se separó en dos scripts nuevos, ninguno toca `demo.py` ni `lingbot_map`:
+
+- **[scripts_webcam/capture_frames.py](scripts_webcam/capture_frames.py):** abre `/dev/video0` vía `cv2.VideoCapture(0, cv2.CAP_V4L2)` (la forma confiable identificada en el análisis anterior, no el `--video_path` de `demo.py` que no sirve para dispositivos en vivo) y graba frames reales a un ritmo fijo (cámara nativa) a una carpeta de PNGs numerados — misma estructura que `example/courthouse`. Captura 400 frames reales en **26.6s** (15fps efectivo).
+- **[scripts_webcam/process_and_view.py](scripts_webcam/process_and_view.py):** reutiliza `demo.load_model`/`load_images`/`postprocess`/`prepare_for_visualization` sin modificar, corre la inferencia, y — hallazgo útil no buscado — descubrió que `PointCloudViewer` ya tiene un botón "Export GLB" en su GUI (`_export_glb()`) que exporta el point cloud reconstruido a un archivo `.glb` portable vía `trimesh`. Como no hay navegador en este entorno para hacer clic en el botón, se llama `_export_glb()` directamente desde Python — mismo código, sin modificar `lingbot_map/vis/point_cloud_viewer.py`.
+
+### Dos bugs de entorno nuevos, encontrados y resueltos en la prueba de humo (15 frames) antes de la corrida completa
+
+1. **`mpl_toolkits.mplot3d`/`Axes3D` roto** — dos instalaciones de matplotlib conflictivas en esta máquina (system apt `python3-matplotlib` 3.5.1 vs pip 3.10.9) rompen específicamente ese import (`ImportError: cannot import name 'docstring' from 'matplotlib'`, el paquete del sistema intenta usar una API de matplotlib vieja). Resuelto evitando `mpl_toolkits` por completo para el preview estático: proyecciones 2D simples (top-down, frontal, lateral) en vez de un eje 3D — el `.glb` ya da una vista 3D interactiva real, el preview solo necesita ser rápido y confiable.
+2. **Falso "colgado" de 2+ horas, en realidad ya había terminado en ~15s:** al probar el script piped a través de `tail -40` (`comando | tail -40`, sin `-f`), `tail` no imprime nada hasta ver EOF del stream — y `viewer.run(background_mode=True)` está diseñado para no retornar nunca (mantiene el proceso vivo sirviendo el visor). El proceso ya había exportado el GLB y guardado el preview en los primeros ~15 segundos; lo que parecía un cuelgue de 2+ horas era simplemente `tail` esperando un EOF que nunca iba a llegar por diseño. Se agregó un flag `--no_serve` para corridas de validación rápida, y se corrigió la metodología de lanzamiento (redirección a archivo + `grep`/`tail -F` para monitorear, nunca `| tail` sin `-f` sobre un proceso que se deja corriendo a propósito).
+
+### Captura real: gente moviéndose en el taller, no una escena estática
+
+La webcam de esta máquina apunta al techo/taller. La prueba de humo (15 frames) mostró una escena mayormente estática (techo, cableado, equipos cubiertos). La captura de 400 frames coincidió con personas moviéndose frente a la cámara (dos personas visibles interactuando en frames intermedios) — escena bastante más dinámica que las secuencias `courthouse`/`university`/`loop` del dataset oficial, y a diferencia de esas, generada en vivo por primera vez en esta investigación.
+
+### Resultado: pipeline completo, real, de punta a punta
+
+```bash
+CUDA_VISIBLE_DEVICES="" python3 scripts_webcam/process_and_view.py \
+  --image_folder captures/webcam_400 --model_path checkpoints/lingbot-map.pt \
+  --glb_out captures/exports/webcam_400.glb \
+  --preview_png captures/exports/webcam_400_preview.png --port 8084
+```
+
+**CPU forzada deliberadamente** (no GPU) — el baseline GPU documentado arriba hace OOM real en el frame ~35 con la config sin modificar; CPU es el único camino ya validado (hasta N=320 sin fallos) para llegar a 400 frames reales sin que el pipeline falle a mitad de camino.
+
+| Métrica | Valor |
+|---|---|
+| Frames capturados | 400 (reales, cámara en vivo) |
+| Tiempo de captura | 26.6s (15fps efectivo) |
+| Tiempo de carga del modelo | 6.0s |
+| `keyframe_interval` auto-seleccionado | **2** (no 1 — `demo.py` cruza su propio umbral de auto-selección en N>320; comportamiento real sin modificar, distinto del régimen kf=1 usado en toda la campaña secuencial hasta N=320, ver nota abajo) |
+| Tiempo de inferencia | 10101.9s (≈168.4 min ≈ 2.8h) |
+| Tiempo por frame (promedio) | 25.25s/frame |
+| Puntos en el point cloud exportado | **6,036,204** |
+| Tamaño del `.glb` exportado | ~97MB |
+| Errores/warnings | Ninguno fatal (el warning benigno de `Axes3D` ya resuelto arriba, no afecta el resultado) |
+
+**Nota sobre `keyframe_interval=2`:** no es un bug ni una modificación — es la lógica de auto-selección real de `demo.py` (`(num_frames+319)//320`) actuando exactamente como en el código sin tocar, simplemente nunca se había cruzado ese umbral en las campañas anteriores (todas ≤320 a propósito). El tiempo por frame (25.25s) no es directamente comparable al de la extensión N=320 (19.28s, régimen kf=1) por este motivo, además del contenido de escena distinto (interior dinámico vs las secuencias del dataset oficial) — dos variables de confusión, no una.
+
+**Entregables:** `.glb` exportado (visualización 3D real, portable) + preview PNG (proyecciones 2D rápidas) + visor `viser` interactivo dejado corriendo en `http://localhost:8084` / `http://172.23.13.81:8084`. No se tocó `demo.py` ni `lingbot_map` para nada de esto — solo los dos scripts nuevos en `scripts_webcam/`.
+
+**Nada de Paragraphica todavía** — este resultado es el cierre del paso 3 de la prioridad experimental del usuario (verificar funcionamiento con cámara real), no el comienzo del paso 4.
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
