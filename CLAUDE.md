@@ -33,6 +33,8 @@ RGB camera → LingBot-Map → depth + pose estimados → point cloud, tratando 
 
 **Actualización 2026-08-25 — Baseline GPU real (Linux/NVIDIA) medido, distinto de la campaña CPU-forzada de arriba:** con GPU real (NVIDIA RTX 2000 Ada, 8GB VRAM, capability 8.9, `demo.py` castea el aggregator a bf16 automáticamente sin tocar nada), el baseline de 200 frames sin modificar **NO es alcanzable — OOM real y reproducible en el frame 35/200**, muy por debajo del punto donde `kv_cache_sliding_window=64` llegaría a saturar la memoria (ese mecanismo nunca llega a activarse; el techo de VRAM de esta GPU llega primero). Inferencia en sí ~25× más rápida que CPU (~0.25s/frame vs ~6.3s/frame). Ver sección "Baseline GPU real (Linux/NVIDIA)" más abajo para el detalle completo (progresión de VRAM por frame, dos regímenes de crecimiento, utilización/temperatura/potencia de GPU). Además, análisis (sin implementar) de qué haría falta para alimentar `demo.py` con una webcam en vivo — ver sección "Análisis de interfaz para webcam RGB en vivo" inmediatamente después: el código actual de `--video_path` no sirve para un dispositivo en vivo (tres problemas concretos identificados), pero el modelo ya expone la primitiva de streaming por-frame necesaria (`GCTStream.forward(..., causal_inference=True)`) sin necesidad de tocar `lingbot_map`.
 
+**Actualización 2026-08-25 (más reciente) — Extensión de la campaña secuencial CPU a N=320:** mismo baseline CPU-forzado de la campaña de 5 fases, extendido más allá de N=200. `courthouse` no llega a 400 frames (286 máximo) ni `university` (324) — se usó `university` con N=320 (el máximo que se mantiene en `keyframe_interval=1`, evitando cruzar el umbral de auto-selección de `demo.py` en 320). **Resultado: la saturación de RAM y la estabilización de tiempo/frame se confirman con más fuerza todavía** — el análisis de deltas *marginales* dentro de la misma corrida (no solo acumulados) muestra ΔRAM/frame prácticamente cero (-0.34 a +9.16 MB/frame) y tiempo/frame marginal convergiendo a una constante (~21.3-21.6s/frame) desde el frame 100 en adelante. Ningún régimen nuevo aparece después de 200 frames — el mecanismo (`kv_cache_sliding_window=64`) sigue siendo la explicación consistente. Ver sección "Extensión de la campaña secuencial: N=320" más abajo (antes de la sección de GPU).
+
 **Pendiente de decisión del usuario:** implementar el driver de captura de webcam en vivo (análisis ya hecho, nada implementado todavía), decidir si mitigar el techo de VRAM de la GPU antes de ese experimento (dado que a ~4 FPS el mismo OOM se alcanzaría en ~9 segundos de captura continua), continuar la campaña secuencial en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o recién ahí empezar la integración/optimización con Paragraphica.
 
 ## Estado del diagnóstico (ya hecho, no repetir)
@@ -940,6 +942,106 @@ Los primeros frames individuales (9-13) rondan 120-176s; los últimos (14-20) ro
 **Esta única corrida de 20 frames NO forma parte del diseño formal (10/25/50/100/200)** — fue reconocimiento para calibrar el umbral de seguridad y obtener un dato real de tiempo antes de comprometerse al diseño completo. Con ~50 min para una sola corrida de 20 frames, y una tendencia de tiempo-por-frame que no es plana, el presupuesto de tiempo real de las 21 corridas propuestas (10×5, 25×5, 50×5, 100×3, 200×3) es sustancialmente mayor a lo estimado originalmente — plausgalmente muchas horas a días de ejecución continua, sobre todo en los tiers de 50/100/200 frames si el crecimiento por frame se sostiene.
 
 **Pendiente, sin iniciar:** las 21 corridas formales del diseño (o el subconjunto reducido que el usuario decida usando su propia cláusula de contingencia ya expresada: priorizar 10/25/50 con repeticiones completas, usar 100/200 solo para confirmar tendencia con menos repeticiones, documentando explícitamente cualquier reducción). Análisis estadístico completo (media/mediana/desviación/mín/máx/tasa de fallos por tier, ΔRAM/frame vs n_frames, tiempo/frame vs n_frames, clasificación constante/lineal/no-lineal) pendiente de tener múltiples corridas por tier — no se puede hacer con n=1.
+
+## Extensión de la campaña secuencial: N=320 (2026-08-25)
+
+**Objetivo:** comprobar si la saturación de RAM y la estabilización de tiempo/frame observadas hasta N=200 (ver "Reporte final de la campaña de caracterización secuencial" más abajo) se mantienen al duplicar nuevamente la longitud de la secuencia. **Mismo baseline exacto que esa campaña** (CPU forzada vía `CUDA_VISIBLE_DEVICES=""`, FP32 + `mmap=True` + `del/gc.collect()`, sin tocar arquitectura/dtype/cuantización/`keyframe_interval`/resolución) — esta es una extensión de la campaña CPU, no relacionada con el baseline GPU documentado en la sección siguiente (que sí tuvo un fallo de VRAM y no llegó a saturar).
+
+### Limitación de dataset — 400 frames no es alcanzable, resuelto con el usuario antes de correr nada
+
+Ninguna de las tres secuencias reales del repo llega a 400 frames: `courthouse` (usada en la campaña original) tiene 286, `university` 324, `loop` 237. Pedirle al usuario cómo resolverlo (en vez de mezclar secuencias o repetir frames por mi cuenta) — decisión: usar `university` (324 frames), la trayectoria real más larga disponible, sin concatenar ni loopear nada.
+
+**Ajuste técnico adicional, no pedido explícitamente pero necesario para mantener "no modificar `keyframe_interval`":** `demo.py` auto-selecciona `keyframe_interval=(num_frames+319)//320` cuando `num_frames>320` — es decir, a partir de 321 frames el propio pipeline sin modificar ya deja de usar `keyframe_interval=1`. Usar los 324 frames completos de `university` hubiera cruzado ese umbral, introduciendo una variable de confusión (cambio de régimen de cacheo) mezclada con el efecto de longitud de secuencia que se quiere medir. Se usó **N=320** (el máximo posible con `university` que se mantiene en `keyframe_interval=1`, igual que las 5 fases anteriores) — así la comparación against N≤200 sigue siendo una extensión limpia del mismo régimen, no una mezcla de dos efectos distintos. `university` tiene margen (324≥320).
+
+**Bug real encontrado y corregido antes de correr esto:** `scripts_seq/run_single.py` tenía `keyframe_interval` **hardcodeado a 1** en vez de implementar la lógica de auto-selección real de `demo.py` — nunca importó en las Fases 1-5 (N≤200, todas por debajo del umbral de 320), pero para esta extensión sí hubiera importado si se llegaba a probar N>320 en el futuro. Corregido para replicar textualmente la lógica de `demo.py::main()`. No cambia ningún resultado ya documentado (todas las fases anteriores tenían N≤200, donde el valor correcto y el hardcodeado coinciden).
+
+### Instrumentación extendida (no reemplaza nada, agrega lo pedido que faltaba)
+
+- **`scripts_seq/monitor.py`:** se agregó utilización de CPU (`psutil.cpu_percent`, sistema y proceso) — no estaba trackeada en la campaña original. Se agregó también un timeline de frames (`note_frame()`) para poder correlacionar memoria con el número de frame exacto, no solo con tiempo transcurrido.
+- **`scripts_seq/run_single.py`:** se agregó el mismo parche de `tqdm.update()` ya usado en el baseline GPU (`scripts_gpu/run_gpu_baseline.py`) para timestampear cada frame individual del streaming contra el reloj del monitor.
+- **`scripts_seq/run_campaign.py`:** se agregaron `--sequence_dir` (la constante estaba hardcodeada a `courthouse`) y `--timeout_s` manual — el modelo cuadrático de timeout ya documentado arriba (calibrado con N=50/100) sobreestimó N=200 en ~27%, así que confiar en él para extrapolar a N=320 hubiera sido aún menos confiable; se usó un timeout manual generoso (3h) en vez de forzar el modelo fuera de su rango calibrado.
+
+### Resultados — N=320, 3 repeticiones, secuencia `university` (2026-08-25)
+
+| Métrica | Media | Mediana | Desv. estándar | Mín | Máx | Rango |
+|---|---|---|---|---|---|---|
+| Tiempo de carga del modelo (s) | 6.383 | 6.430 | 0.108 | 6.260 | 6.460 | 0.200 |
+| Tiempo de inferencia, 320 frames (s) | 6169.660 | 6181.230 | 40.436 | 6124.700 | 6203.050 | 78.350 |
+| Tiempo por frame (s) | 19.280 | 19.316 | 0.126 | 19.140 | 19.384 | 0.245 |
+| Tiempo total de la corrida (s) | 6178.867 | 6190.350 | 40.534 | 6133.830 | 6212.420 | 78.590 |
+| RSS pico (MB) | 20381.6 | 20391.8 | 187.1 | 20189.6 | 20563.3 | 373.7 |
+| RSS tras cargar el modelo (MB) | 6149.0 | 6135.9 | 48.3 | 6108.7 | 6202.5 | 93.8 |
+| RSS final, tras inferencia (MB) | 19437.4 | 19430.9 | 186.9 | 19253.8 | 19627.5 | 373.7 |
+| RAM libre mínima del sistema (MB) | 6456.9 | 6362.0 | 258.9 | 6258.8 | 6749.9 | 491.1 |
+| **ΔRAM/frame (MB/frame)** | **41.5** | 41.5 | 0.4 | 41.1 | 42.0 | 0.9 |
+| Utilización CPU pico (sistema) | 81.5% | 81.5% | 2.2 | 79.3% | 83.6% | 4.3 |
+| Utilización CPU pico (proceso) | 1436.7% | 1436.8% | 2.1 | 1434.6% | 1438.7% | 4.1 |
+| `keyframe_interval` usado | 1 (las 3 repeticiones) | — | — | — | — | — |
+
+**Tasa de fallos: 0/3 (0%).** Variabilidad entre repeticiones extremadamente baja (CV de tiempo/frame ~0.65%, de ΔRAM/frame ~1.1%) — resultado reproducible. **VRAM: no aplica** (CUDA oculta deliberadamente para preservar el baseline FP32 CPU, igual que en toda esta campaña — no confundir con la sección de baseline GPU más abajo, que sí midió VRAM real en una configuración distinta).
+
+### Evolución frame a frame dentro de la corrida (promedio de las 3 repeticiones, misma secuencia `university`)
+
+Checkpoints pedidos en 10/25/50/100/200/300/320 frames, correlacionando el timeline de frames (`frame_events`) con las muestras continuas de RAM:
+
+| Frames | Tiempo acumulado (s) | RSS (MB) | Tiempo/frame acumulado (s) |
+|---|---|---|---|
+| 10 | 70.75 | 9659.1 | 7.075 |
+| 25 | 204.88 | 12148.6 | 8.195 |
+| 50 | 513.52 | 16181.2 | 10.270 |
+| 100 | 1474.66 | 19467.7 | 14.747 |
+| 200 | 3603.18 | 19433.9 | 18.016 |
+| 300 | 5746.41 | 19472.1 | 19.155 |
+| 320 | 6178.30 | 19655.3 | 19.307 |
+
+**El hallazgo más limpio de toda esta extensión: los deltas *marginales* entre checkpoints, no solo los acumulados.**
+
+| Intervalo | Δframes | ΔRAM (MB) | ΔRAM/frame marginal (MB) | Δtiempo (s) | Δtiempo/frame marginal (s) |
+|---|---|---|---|---|---|
+| 10→25 | 15 | +2489.5 | 165.97 | 134.1 | 8.942 |
+| 25→50 | 25 | +4032.6 | 161.30 | 308.6 | 12.345 |
+| 50→100 | 50 | +3286.5 | 65.73 | 961.1 | 19.223 |
+| 100→200 | 100 | **-33.8** | **-0.34** | 2128.5 | 21.285 |
+| 200→300 | 100 | **+38.2** | **0.38** | 2143.2 | 21.432 |
+| 300→320 | 20 | +183.2 | 9.16 | 431.9 | 21.595 |
+
+**RAM: el delta marginal es esencialmente cero desde el frame 100 en adelante** (-0.34, 0.38, 9.16 MB/frame — comparar contra 165.97/161.30/65.73 MB/frame de los tramos anteriores). No es solo "una tasa decreciente" como se veía hasta N=200 — es una **meseta genuina**: agregar 220 frames más (de 100 a 320) sumó un total neto de apenas ~187MB, dentro del ruido de medición entre repeticiones.
+
+**Tiempo: el costo marginal por frame converge a una constante ≈21.3-21.6s/frame desde el frame 100.** Esto es más informativo que el tiempo/frame *acumulado* (que sigue subiendo lentamente, 14.7→18.0→19.2→19.3s, porque promedia los frames baratos del principio con los frames en régimen estable) — el costo real y actual de procesar CADA frame nuevo, una vez pasada la fase de llenado del caché KV, es prácticamente constante, no creciente. Esto confirma con más fuerza todavía la hipótesis de `kv_cache_sliding_window=64`: una vez el caché está lleno y en régimen de ventana deslizante, el costo de atención por frame deja de crecer — se estabiliza en un valor fijo, no solo desacelera.
+
+### Comparación contra los tiers históricos (courthouse, N=10-200) — con una salvedad importante
+
+| N | Secuencia | Tiempo/frame (s) | ΔRAM/frame (MB) |
+|---|---|---|---|
+| 10 | courthouse | 6.322 | 329.5 |
+| 25 | courthouse | 7.609 | 245.6 |
+| 50 | courthouse | 10.059 | 198.3 |
+| 100 | courthouse | 14.492 | 134.3 |
+| 200 | courthouse | 16.841 | 66.8 |
+| **320** | **university** | **19.280** | **41.5** |
+
+Cambio 200→320: tiempo/frame **+14.5%** (continúa desacelerando: +20.4%→+32.2%→+44.1%→+16.2%→**+14.5%**), ΔRAM/frame **-37.8%** (continúa cayendo: -25.5%→-19.3%→-32.3%→-50.3%→**-37.8%**).
+
+**Salvedad explícita:** esta tabla compara `courthouse` (N≤200) contra `university` (N=320) — **secuencias distintas, contenido de escena distinto.** La prueba de humo N=10 en `university` (antes de la corrida completa) ya mostró una diferencia de ~8% en tiempo/frame respecto al mismo N en `courthouse` (5.824s vs 6.322s) — atribuible al contenido de la escena, no a la longitud de secuencia. Por eso **el análisis de deltas marginales dentro de la misma corrida (tabla anterior, todo en `university`) es la evidencia más confiable** para responder si el comportamiento cambia con N — no esta comparación cruzada, que mezcla dos efectos. Se incluye igual porque fue pedida explícitamente y la dirección de la tendencia (ambas desacelerando/cayendo) es consistente con el análisis marginal, no lo contradice.
+
+### Respuestas a las cuatro preguntas de esta extensión
+
+**1. ¿La memoria sigue saturándose entre 200 y 320(400) frames?** **Sí, con más fuerza que antes.** El ΔRAM/frame marginal es prácticamente cero (-0.34 a +9.16 MB/frame) en todo el tramo 100→320 — no es una tendencia decreciente todavía en marcha, es una meseta ya alcanzada.
+
+**2. ¿El tiempo por frame sigue estabilizándose?** **Sí, y de forma más contundente que con el análisis acumulado únicamente.** El costo marginal por frame converge a una constante (~21.3-21.6s/frame) desde el frame 100 — el tiempo/frame acumulado sigue subiendo despacio solo porque todavía está promediando con los frames baratos del arranque, no porque el costo real siga creciendo.
+
+**3. ¿Existe evidencia de un nuevo régimen de consumo después de 200 frames?** **No.** Todo lo contrario: el régimen que empezaba a insinuarse en la Fase 5 (N=200, ver "Reporte final" abajo) se confirma y se profundiza — mismo mecanismo (`kv_cache_sliding_window=64`), ahora con evidencia marginal mucho más limpia que la disponible con los datos hasta N=200 solamente.
+
+**4. ¿Podemos considerar caracterizado el comportamiento temporal de LingBot-Map hasta 400 frames?** **Hasta 320, sí, con buena confianza — hasta 400 exactos, no se probó (limitación de dataset, no de comportamiento).** La evidencia marginal (RAM prácticamente plana, tiempo/frame marginal constante) es lo bastante clara y consistente entre repeticiones (variabilidad <1.2% en ambas métricas) como para esperar que el mismo régimen se sostenga si se consiguiera una secuencia real de 400+ frames — pero esa extrapolación de 320 a 400 no está medida, es una expectativa razonable, no un hecho verificado.
+
+### Limitaciones explícitas
+
+- No se alcanzaron 400 frames reales (limitación de dataset, resuelta con el usuario, documentada arriba) — el máximo probado es 320.
+- La comparación contra los tiers históricos mezcla dos secuencias distintas (`courthouse` vs `university`) — mitigado usando el análisis de deltas marginales dentro de la misma corrida como evidencia principal, no la comparación cruzada.
+- Solo se probó `keyframe_interval=1` (igual que toda la campaña anterior) — el comportamiento con `keyframe_interval>1` (el régimen que se activaría pasando de 320 frames) sigue sin probarse.
+- No se validó calidad geométrica (drift de pose, degradación de profundidad) — esta extensión, igual que la campaña original, midió solo memoria y tiempo.
+
+**Estado: extensión a N=320 completa. 3/3 corridas exitosas, 0 fallos. Las cuatro preguntas de esta extensión quedan respondidas con evidencia marginal más limpia que la disponible en el reporte original — refuerza, no contradice, las conclusiones de la campaña de 5 fases (10→200).**
 
 ## Baseline GPU real (Linux/NVIDIA) — antes de cualquier optimización/integración con Paragraphica (2026-08-25)
 
