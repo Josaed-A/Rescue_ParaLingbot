@@ -1215,6 +1215,42 @@ CUDA_VISIBLE_DEVICES="" python3 scripts_webcam/process_and_view.py \
 
 **Nada de Paragraphica todavía** — este resultado es el cierre del paso 3 de la prioridad experimental del usuario (verificar funcionamiento con cámara real), no el comienzo del paso 4.
 
+## Convención de carpetas para pruebas locales con cámara física (2026-08-27)
+
+**Pedido explícito del usuario:** organizar los frames de pruebas físicas separando cada prueba individualmente, en vez de carpetas sueltas/ad-hoc (`captures/local_test/` plano, `captures/local_test_<timestamp>/`), para que las próximas pruebas queden ordenadas desde el principio.
+
+**Convención adoptada, vigente desde ahora:**
+```
+captures/local_test/
+  prueba_1/
+    frames/           <- PNGs numerados de la captura real (000000.png, 000001.png, ...)
+    info.json         <- metadata: fecha, cámara, fps objetivo/efectivo, nº de frames, notas
+    exports/
+      prueba_1.glb           <- point cloud exportado (mismo mecanismo que webcam_400.glb arriba)
+      prueba_1_preview.png   <- proyecciones 2D rápidas (mismo formato que el preview de 400 frames)
+  prueba_2/
+    ...
+```
+Cada prueba nueva es una carpeta `prueba_N/` autocontenida — captura, metadata y visualización juntas, nada mezclado entre pruebas. No se tocó ningún script (`capture_frames.py`/`process_and_view.py` ya aceptan `--out_dir`/`--image_folder`/`--glb_out`/`--preview_png` genéricos, así que la convención es puramente de organización de carpetas, no de código).
+
+**Las carpetas sueltas anteriores se limpiaron** (`captures/local_test/` plano de 20 frames sin exportar, `captures/local_test_1787841957/` vacía) — no eran resultados documentados en ningún lado todavía, sin pérdida real. `captures/smoke_test/` y `captures/webcam_400/` (la prueba de 400 frames, sección anterior) **no se tocaron** — ya estaban documentadas con sus propios nombres y quedan como están, fuera de esta convención nueva (son de antes de que existiera).
+
+### `prueba_1` — primera prueba con la convención nueva (2026-08-27)
+
+20 frames reales capturados (`--fps 5`, 3.8s de captura), procesados en GPU (rápido, muy por debajo del límite de VRAM de ~35 frames), visor `viser` dejado corriendo en el puerto 8086.
+
+| Métrica | Valor |
+|---|---|
+| Frames | 20 |
+| Tiempo de carga del modelo | 8.5s |
+| Tiempo de inferencia | 6.9s (0.35s/frame) |
+| Puntos exportados | 350,396 |
+| `.glb` | `captures/local_test/prueba_1/exports/prueba_1.glb` (5.65MB) |
+
+Escena: persona frente a la cámara en el taller (visible en la reconstrucción como un bloque de color piel/marrón sobre el fondo del techo/estantería).
+
+**Estado: convención establecida y validada con `prueba_1`. Las próximas pruebas físicas locales deben seguir este mismo patrón (`prueba_2`, `prueba_3`, ...).**
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).

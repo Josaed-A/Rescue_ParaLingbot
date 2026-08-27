@@ -21,4 +21,5 @@ docs/
 checkpoints/
 results/
 results_gpu/
+captures/
 
