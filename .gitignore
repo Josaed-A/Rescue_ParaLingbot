@@ -10,6 +10,7 @@ demo_render/
 .claude/
 .agents/
 skyseg.onnx
+skyseg_batch.onnx
 .claude-remote
 weights/
 .DS_Store

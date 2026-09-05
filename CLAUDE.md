@@ -1263,6 +1263,28 @@ Escena: persona frente a la cámara en el taller (visible en la reconstrucción 
 
 **Nada de código cambió** — sigue siendo pura organización de carpetas; `capture_frames.py`/`process_and_view.py` ya aceptan rutas arbitrarias vía `--out_dir`/`--image_folder`/`--glb_out`/`--preview_png`.
 
+## Instalación de dependencias para `demo_render/` (pipeline offline, secuencias largas tipo "25,000 frames") (2026-09-05)
+
+**Pedido explícito del usuario:** instalar lo necesario para poder hacer pruebas "long indoor" y tener el repo completamente funcional con todas las herramientas de `lingbot_map`, en referencia al ["Featured indoor walkthrough" del README upstream](https://github.com/Robbyant/lingbot-map#-featured-indoor-walkthrough-25-000-frames-13-minutes) (~25,000 frames, 13 minutos, renderizado con `demo_render/batch_demo.py`).
+
+### Resuelto sin bloqueos (instalado en esta sesión)
+
+- **`open3d==0.19.0`, `onnxruntime-gpu==1.23.2`, `pyyaml==6.0.2`** — instalados vía pip directo (siguiendo `demo_render/requirements.txt`), sin sudo. `onnxruntime-gpu` confirma `CUDAExecutionProvider` disponible (`ort.get_available_providers()`).
+- **Extra `vis` completado:** esta máquina nunca había corrido `pip install -e ".[vis]"` completo (se habían instalado `viser`/`matplotlib`/`trimesh` sueltos en sesiones anteriores) — el intento de instalación editable falló (`pyproject.toml` no soporta el hook `build_editable` de PEP 660 con el setuptools instalado), pero no hace falta modo editable (`lingbot_map` ya se importa correctamente por estar en el cwd, confirmado en sesiones anteriores) — se instalaron las dependencias del extra directamente por nombre (`viser`, `trimesh`, `matplotlib`, `onnxruntime`, `requests`).
+- **`skyseg_batch.onnx`** (168MB, modelo de segmentación de cielo para el pipeline offline, distinto del `skyseg.onnx` que usa el `demo.py` de raíz) — descargado vía `hf-mirror.com` (mismo workaround ya documentado arriba para el checkpoint principal; este repo de HF específico tiene throttling severo para descargas directas). Verificado: carga correctamente con `onnxruntime.InferenceSession`.
+- **`ffmpeg`** (requerido por el pipeline offline para ensamblar el MP4 final) — **no estaba instalado, y `apt install` requiere sudo con contraseña, no disponible sin interacción del usuario.** Resuelto sin sudo: build estático de [johnvansickle.com](https://johnvansickle.com/ffmpeg/) descargado e instalado en `~/.local/bin/ffmpeg` (`~/.local/bin` ya está en el `PATH` de este usuario). Verificado con `ffmpeg -version`.
+
+### Bloqueado — requiere una decisión del usuario, no resuelto
+
+**`demo_render/render_cuda_ext` (extensiones CUDA `voxel_morton_ext`/`frustum_cull_ext`) y NVIDIA Kaolin necesitan un CUDA toolkit local (`nvcc`), que esta máquina no tiene** — solo el driver (580.173.02) está instalado, no el toolkit de desarrollo:
+- Intento real de build (`cd demo_render/render_cuda_ext && python setup.py build_ext --inplace`) falla con `OSError: CUDA_HOME environment variable is not set` — confirmado empíricamente, no supuesto.
+- Kaolin: el índice de wheels prebuilt que indica el README (`nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.8.0_cu128.html`) **solo publica wheels para torch 2.8.0 + CUDA 12.8** — esta máquina tiene **torch 2.12.0+cu130** (CUDA 13.0), un mismatch en ambos ejes (versión de torch y de CUDA). No hay wheel compatible; instalarlo requeriría compilar Kaolin desde fuente, que también necesita el toolkit de CUDA local.
+- Instalar un toolkit de CUDA completo (~4-5GB) es posible sin sudo (instalador `.run` de NVIDIA con `--toolkitpath` a un directorio propio del usuario, evitando el instalador de driver) pero es una operación pesada (descarga grande, riesgo de fragilidad en el build de Kaolin después, tal como advierte el propio README: *"NVIDIA Kaolin does not publish prebuilt wheels for PyTorch 2.9.x — build from source"*) — no se hizo sin confirmar con el usuario, dado el costo/riesgo.
+
+**Importante — esto NO bloquea todas las "pruebas long indoor", solo el renderizador MP4 offline específico:** el modo `--mode windowed --window_size 128` de `demo.py` (el visor interactivo `viser`, el que se usa en toda esta investigación) **ya funciona para secuencias largas (>3000 frames) sin necesitar Kaolin ni las extensiones CUDA** — esas dos dependencias solo hacen falta para `demo_render/batch_demo.py`, el pipeline específico que genera el video MP4 pre-renderizado tipo el walkthrough de 25,000 frames del README (necesario cuando la secuencia es demasiado larga para el visor interactivo en el navegador, no para poder *procesarla* en absoluto).
+
+**Pendiente de decisión del usuario:** (a) instalar el CUDA toolkit sin sudo en un prefix propio para completar `batch_demo.py`/Kaolin, aceptando el costo de tiempo y el riesgo de un build frágil; (b) pedirle al usuario que instale el toolkit con `sudo apt install nvidia-cuda-toolkit` (o el instalador oficial de NVIDIA) él mismo; o (c) por ahora quedarse con `demo.py --mode windowed` (ya funcional) para secuencias largas, y dejar el renderizador offline MP4 para más adelante si hace falta específicamente ese formato de salida.
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
