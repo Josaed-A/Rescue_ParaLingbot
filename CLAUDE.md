@@ -1251,6 +1251,18 @@ Escena: persona frente a la cámara en el taller (visible en la reconstrucción 
 
 **Estado: convención establecida y validada con `prueba_1`. Las próximas pruebas físicas locales deben seguir este mismo patrón (`prueba_2`, `prueba_3`, ...).**
 
+### Generalización de la convención — recurrente, aplica a cualquier carpeta de dispositivo (2026-09-05)
+
+**Pedido explícito del usuario:** extender la convención de `prueba_N/` (arriba, hecha para `captures/local_test/`) a `captures/webcam_400/`, que hasta ahora tenía los 400 frames sueltos directamente adentro (sin `prueba_N/`) y sus exports en una carpeta separada (`captures/exports/webcam_400.glb`). Regla fijada como **recurrente** (aplica a toda prueba futura, no solo a esta):
+
+1. **Cada carpeta de nivel superior bajo `captures/` representa un dispositivo/cámara** (ej. `local_test`, `webcam_400`). Adentro, cada prueba individual con ese dispositivo es una subcarpeta `prueba_N/` autocontenida (`frames/`, `info.json`, `exports/`), exactamente como ya se definió arriba para `local_test`.
+2. **Prueba nueva con el mismo dispositivo** → nueva carpeta hermana `prueba_N+1/` dentro de la misma carpeta de dispositivo (ej. `captures/webcam_400/prueba_2/`).
+3. **Prueba con un dispositivo/cámara distinto** → nueva carpeta hermana a nivel de `captures/` (hermana de `local_test`, `webcam_400`, etc.), nombrada según el dispositivo/cámara usado (ej. `captures/camara_externa_usb/`, `captures/telefono_android/`) — **no** reusar `webcam_400` ni `local_test` para un dispositivo distinto. Esa carpeta nueva sigue la misma estructura interna (`prueba_1/`, `prueba_2/`, ...) desde el principio.
+
+**Reorganización aplicada a `captures/webcam_400/` (2026-09-05):** los 400 frames sueltos se movieron a `captures/webcam_400/prueba_1/frames/`; los exports (`captures/exports/webcam_400.glb` y `..._preview.png`) se movieron y renombraron a `captures/webcam_400/prueba_1/exports/prueba_1.glb` / `prueba_1_preview.png` (mismo criterio de nombre que en `local_test/prueba_1/`); se agregó `captures/webcam_400/prueba_1/info.json` con los datos ya documentados en la sección "Primera prueba con cámara real (webcam)" más arriba (400 frames, CPU, `keyframe_interval=2`, 6,036,204 puntos, etc. — no se remidió nada, solo se reorganizaron los archivos ya existentes). `captures/smoke_test/` (la prueba de validación de 15 frames) **no se tocó** — no fue mencionada en el pedido, queda fuera de la convención por ahora hasta que se indique lo contrario.
+
+**Nada de código cambió** — sigue siendo pura organización de carpetas; `capture_frames.py`/`process_and_view.py` ya aceptan rutas arbitrarias vía `--out_dir`/`--image_folder`/`--glb_out`/`--preview_png`.
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
