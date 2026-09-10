@@ -1285,6 +1285,58 @@ Escena: persona frente a la cámara en el taller (visible en la reconstrucción 
 
 **Pendiente de decisión del usuario:** (a) instalar el CUDA toolkit sin sudo en un prefix propio para completar `batch_demo.py`/Kaolin, aceptando el costo de tiempo y el riesgo de un build frágil; (b) pedirle al usuario que instale el toolkit con `sudo apt install nvidia-cuda-toolkit` (o el instalador oficial de NVIDIA) él mismo; o (c) por ahora quedarse con `demo.py --mode windowed` (ya funcional) para secuencias largas, y dejar el renderizador offline MP4 para más adelante si hace falta específicamente ese formato de salida.
 
+## CUDA toolkit instalado + `demo_render` completamente funcional (2026-09-10)
+
+**Pedido explícito del usuario:** "instalá el toolkit" — resolver el bloqueo documentado en la sección anterior (extensiones CUDA de `demo_render/render_cuda_ext` y Kaolin, ambos sin poder construirse por falta de un CUDA toolkit local).
+
+### CUDA toolkit 13.0 instalado sin sudo, en un prefix propio del usuario
+
+- Instalador oficial de NVIDIA (`cuda_13.0.0_580.65.06_linux.run`, 4.3GB) descargado directo de `developer.download.nvidia.com` (sin throttling, a diferencia de los repos de HF de este proyecto). **Primer intento de descarga se cortó al 58%** (`curl: (56) OpenSSL SSL_read: Connection timed out`) — resuelto con `curl -C -` (resume) + `--retry 10 --speed-limit 1024 --speed-time 60` para detectar y reintentar cortes de conexión automáticamente.
+- Instalado con `bash cuda_13.0.0_580.65.06_linux.run --silent --toolkit --toolkitpath=$HOME/cuda-13.0 --no-opengl-libs --no-drm --override` — **solo el toolkit, sin el instalador de driver** (el driver del sistema, 580.173.02, ya es más nuevo que el que trae el runfile, 580.65.06; instalar ese driver más viejo hubiera sido un downgrade indeseado). Nota: el script del instalador falla si se invoca con `sh` (que en Ubuntu es `dash`, no `bash`) — usar `bash` explícitamente.
+- `nvcc --version` confirma **CUDA 13.0.48**, coincide con el build de torch instalado (`torch 2.12.0+cu130`).
+- Vive en `$HOME/cuda-13.0` (fuera del repo, no versionado) — para usarlo hace falta `export CUDA_HOME=$HOME/cuda-13.0`, `export PATH=$CUDA_HOME/bin:$PATH` antes de compilar. **No se agregó todavía a `.bashrc`/perfil de shell** — cada sesión nueva que quiera compilar algo con CUDA necesita exportar estas variables a mano, o usar el script de activación si se decide crear uno.
+
+### Complicación real durante el build: mismatch de driver/NVML (de nuevo)
+
+Al intentar compilar, `nvidia-smi` volvió a fallar con `Failed to initialize NVML: Driver/library version mismatch` — el mismo síntoma que al principio de esta sesión larga (resuelto en su momento con un reinicio). Esta vez la causa más probable es una actualización automática del paquete del driver en background (`unattended-upgrades` ya se había visto como inhibidor activo en sesiones anteriores) que actualizó la librería userspace sin recargar el módulo del kernel — **requiere otro reinicio para volver a tener GPU funcional**, no resuelto todavía (no reiniciado sin confirmar con el usuario, dado que la última vez que se reinició fue a pedido explícito).
+
+**Workaround aplicado para poder compilar de todos modos:** `torch.cuda.get_device_capability()` (usado internamente por `torch.utils.cpp_extension` para autodetectar la arquitectura GPU objetivo) falla si no hay GPU visible, causando `IndexError: list index out of range`. Se fijó `export TORCH_CUDA_ARCH_LIST="8.9"` (la capability ya conocida de esta GPU, RTX 2000 Ada) para saltear la detección en vivo — permite **compilar** para esa arquitectura sin necesitar que la GPU esté accesible en ese momento. **Esto no soluciona el problema de fondo** (la GPU sigue sin funcionar hasta el próximo reinicio) — solo desbloquea la compilación.
+
+### Extensiones CUDA de `demo_render/render_cuda_ext` — compiladas y verificadas
+
+```bash
+export CUDA_HOME=$HOME/cuda-13.0
+export PATH=$CUDA_HOME/bin:$PATH
+export TORCH_CUDA_ARCH_LIST="8.9"
+cd demo_render/render_cuda_ext && python3 setup.py build_ext --inplace
+```
+Compiló `voxel_morton_ext` y `frustum_cull_ext` sin errores. Verificado: **importan correctamente** (`import torch` antes de importar las extensiones alcanza para que encuentren `libc10.so` etc. — no hace falta `LD_LIBRARY_PATH` extra en uso normal, cualquier script que las use ya importa `torch` primero).
+
+### Kaolin — compilado desde fuente, con un efecto secundario real corregido
+
+```bash
+export CUDA_HOME=$HOME/cuda-13.0 PATH=$CUDA_HOME/bin:$PATH TORCH_CUDA_ARCH_LIST="8.9"
+python3 -m pip install --no-build-isolation git+https://github.com/NVIDIAGameWorks/kaolin.git
+```
+Instaló **Kaolin 0.18.0** correctamente (sin wheel prebuilt disponible para torch 2.12.0+cu130, exactamente como se anticipó en la sección anterior) — pero **como efecto secundario, actualizó `numpy` de 1.26.4 a 2.2.6** (dependencia transitiva sin pin explícito). Esto **rompió `kaolin` mismo** al importarlo (`ValueError: numpy.dtype size changed, may indicate binary incompatibility`, en el `scipy` del sistema —`/usr/lib/python3/dist-packages/scipy`— compilado contra numpy 1.x). Confirma la advertencia explícita de `demo_render/requirements.txt` ("el core numpy<2 constraint viene de la instalación base de lingbot-map").
+
+**Fix: `pip install numpy==1.26.4`** (downgrade de vuelta). Pip avisa de un conflicto de metadata (`plyfile` y `opencv-python` instalados declaran `numpy>=2`) pero **en la práctica todo sigue funcionando** — verificado explícitamente después del downgrade: `numpy`, `cv2`, `torch`, `lingbot_map`, `kaolin`, `open3d`, `onnxruntime` importan sin error. **Fragilidad a vigilar:** cualquier `pip install` futuro de un paquete que dependa de numpy sin pin explícito podría volver a subir numpy a 2.x silenciosamente y romper `kaolin`/`scipy` de nuevo — no hay una defensa automática contra esto, solo queda documentado como riesgo conocido.
+
+### Verificación end-to-end post-cambios
+
+Corrida real de `demo.py` (CPU forzada, la GPU sigue rota por el mismatch de NVML) sobre 5 frames de `captures/local_test/prueba_1/frames/` — **completa sin errores**: carga 6.2s, inferencia 36.5s, visor `viser` levantado en el puerto 8099. Confirma que toda la instalación de CUDA toolkit + extensiones + Kaolin + el downgrade de numpy **no rompió el pipeline principal** (`demo.py`), a pesar de la cantidad de paquetes tocados.
+
+### Estado final de las herramientas de `lingbot_map`
+
+| Componente | Estado |
+|---|---|
+| `demo.py` (interactivo, `viser`) | ✅ Funcional (CPU verificado ahora mismo; GPU funcionaba antes del mismatch de NVML, debería volver tras reiniciar) |
+| `demo.py --mode windowed` (secuencias largas, sin renderizado offline) | ✅ Funcional (no depende de nada de lo instalado hoy) |
+| Sky masking (`--mask_sky`, `skyseg.onnx`) | ✅ `onnxruntime` instalado |
+| `demo_render/batch_demo.py` (renderizador offline, secuencias tipo 25,000 frames) | ✅ Dependencias completas por primera vez (`open3d`, `ffmpeg`, `skyseg_batch.onnx`, extensiones CUDA, Kaolin) — **no probado end-to-end todavía** (ni con un video real ni con GPU, dado el mismatch de NVML pendiente) |
+
+**Pendiente de decisión del usuario:** (a) reiniciar la máquina para recuperar la GPU (necesario para probar `batch_demo.py` de verdad, que es una carga de trabajo pesada de GPU) — no se hizo sin confirmar, dado que la sesión larga anterior solo se reinició a pedido explícito; (b) agregar `CUDA_HOME`/`PATH` al perfil de shell (`.bashrc`) para no tener que exportarlos a mano en cada sesión nueva — tampoco se tocó el perfil de shell del usuario sin pedirlo; (c) correr una prueba real de `batch_demo.py` una vez la GPU esté disponible de nuevo (todavía no se descargó el video de ejemplo de 25,000 frames — es un archivo grande de `robbyant/lingbot-map-demo` en HF, no descargado todavía).
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
