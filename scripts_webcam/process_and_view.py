@@ -53,6 +53,12 @@ def main():
                          "(demo.py's own flag; its --help claims it's on by default "
                          "but the actual argparse default is False). Cuts GPU peak "
                          "memory growth over a long sequence.")
+    p.add_argument("--kv_cache_sliding_window", type=int, default=64,
+                    help="demo.py's own flag (default 64): max frames kept in the "
+                         "streaming KV cache. On an 8GB GPU at 518x518 the SDPA "
+                         "path OOMs once ~26 frames are cached, so a window below "
+                         "that (e.g. 16) is what makes long sequences fit -- at "
+                         "the cost of less temporal context for pose estimation.")
     p.add_argument("--use_sdpa", action="store_true",
                     help="Force PyTorch SDPA attention instead of FlashInfer "
                          "(demo.py's own flag, default off). The SDPA streaming "
@@ -82,7 +88,7 @@ def main():
     model_args = argparse.Namespace(
         model_path=args.model_path, image_size=518, patch_size=14,
         mode="streaming", enable_3d_rope=True, max_frame_num=1024,
-        num_scale_frames=args.num_scale_frames, kv_cache_sliding_window=64,
+        num_scale_frames=args.num_scale_frames, kv_cache_sliding_window=args.kv_cache_sliding_window,
         camera_num_iterations=1, use_sdpa=args.use_sdpa, compile=False,
     )
     t0 = time.time()
@@ -105,7 +111,8 @@ def main():
 
     output_device = torch.device("cpu") if args.offload_to_cpu else None
     print(f"num_scale_frames={args.num_scale_frames} "
-          f"offload_to_cpu={args.offload_to_cpu} use_sdpa={args.use_sdpa}", flush=True)
+          f"offload_to_cpu={args.offload_to_cpu} use_sdpa={args.use_sdpa} "
+          f"kv_cache_sliding_window={args.kv_cache_sliding_window}", flush=True)
 
     t0 = time.time()
     with torch.no_grad(), torch.amp.autocast("cuda", dtype=dtype):
