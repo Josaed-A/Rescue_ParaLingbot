@@ -1337,6 +1337,32 @@ Corrida real de `demo.py` (CPU forzada, la GPU sigue rota por el mismatch de NVM
 
 **Pendiente de decisión del usuario:** (a) reiniciar la máquina para recuperar la GPU (necesario para probar `batch_demo.py` de verdad, que es una carga de trabajo pesada de GPU) — no se hizo sin confirmar, dado que la sesión larga anterior solo se reinició a pedido explícito; (b) agregar `CUDA_HOME`/`PATH` al perfil de shell (`.bashrc`) para no tener que exportarlos a mano en cada sesión nueva — tampoco se tocó el perfil de shell del usuario sin pedirlo; (c) correr una prueba real de `batch_demo.py` una vez la GPU esté disponible de nuevo (todavía no se descargó el video de ejemplo de 25,000 frames — es un archivo grande de `robbyant/lingbot-map-demo` en HF, no descargado todavía).
 
+## Nueva categoría: "pruebas reales" por sitio físico, distinta de las pruebas locales con webcam (2026-09-14)
+
+**Pedido explícito del usuario:** el usuario va a mapear **sitios físicos reales distintos** (no solo pruebas locales con la webcam de escritorio) — pidió una categorización separada que distinga esto, con un video real que él mismo puso en el repo (`muestra_unisabana.mp4`, un recorrido grabado con teléfono en la Universidad de la Sabana) como primer caso.
+
+**Convención nueva, adicional a la de `prueba_N/` por dispositivo ya establecida (no la reemplaza):**
+```
+captures/
+  local_test/            <- pruebas locales de desarrollo con la webcam (convención anterior, sin cambios)
+  webcam_400/            <- ídem
+  pruebas_reales/         <- NUEVA categoría: mapeos de sitios físicos reales
+    unisabana/            <- un sitio = una carpeta
+      prueba_1/
+        source/           <- el archivo original (video/lo que sea), sin procesar
+        frames/           <- frames extraídos, numerados
+        info.json         <- metadata (sitio, fuente, fps de extracción, nº de frames, notas)
+        exports/          <- .glb + preview, mismo criterio que toda la investigación
+      prueba_2/
+        ...
+    <otro_sitio>/
+      prueba_1/
+      ...
+```
+**Regla recurrente:** cada sitio físico nuevo (edificio, campus, lo que sea) es una carpeta hermana dentro de `captures/pruebas_reales/`, nombrada según el sitio (ej. `unisabana`). Adentro, cada prueba en ese sitio sigue la misma estructura `prueba_N/` ya usada en el resto del proyecto, con el agregado de una subcarpeta `source/` para conservar el archivo original (video, etc.) sin procesar — no existía antes porque las pruebas de webcam no partían de un archivo fuente pregrabado.
+
+**Reorganización aplicada:** el video se movió a `captures/pruebas_reales/unisabana/prueba_1/source/muestra_unisabana.mp4`; se extrajeron **660 frames a 10fps** (`ffmpeg -vf fps=10`, no el `--video_path` de `demo.py` — se prefirió extraer nosotros mismos para mantener la estructura de carpetas propia) a `captures/pruebas_reales/unisabana/prueba_1/frames/`. Video: 66s, 1920x1080 nativo pero **portrait** (metadata de rotación -90°, confirmado que tanto `ffmpeg` como `cv2.VideoCapture` la aplican correctamente sin intervención — no hace falta `--rotate_clockwise_90`). Escena: recorrido indoor por pasillos de un edificio (sin cielo visible, `--mask_sky` no aplica).
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
