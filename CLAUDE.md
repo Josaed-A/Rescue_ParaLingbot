@@ -1406,6 +1406,30 @@ Agregados (todos flags existentes de `demo.py` o capacidades documentadas del mo
 
 **Chequeo post-instalación — sin roturas:** `onnxruntime 1.23.2`, `open3d 0.19.0`, `kaolin 0.18.0`, `cv2 4.13.0`, `lingbot_map`, `viser 1.1.0`, `trimesh 4.12.2` importan correctamente, y `skyseg_batch.onnx` carga con `onnxruntime.InferenceSession` — `protobuf` 7.x no afectó al pipeline de sky masking. Próximo paso: reinicio → reintento de los 660 frames en GPU sin `--use_sdpa` (FlashInfer).
 
+## Post-reinicio: FlashInfer descartado con números, `kv_cache_sliding_window=16` desbloquea GPU (2026-09-14)
+
+**Chequeo post-reinicio — todo sano:** `torch.cuda.is_available()==True` (RTX 2000 Ada, driver 580.178.04, 14 MiB en uso), `flashinfer 0.6.18.post1`, `numpy 1.26.4`, `cv2`, `onnxruntime`, `open3d`, `kaolin`, `viser`, `trimesh`, `lingbot_map` importan; repo limpio y sincronizado con `origin/main`; 660 frames, checkpoint, `skyseg_batch.onnx` y las `.so` de `render_cuda_ext` presentes.
+
+### FlashInfer: ahora sí se usa, pero su pool preasignado no puede entrar en 8GB
+
+Sin `--use_sdpa`, el path entra en `FlashInferKVCacheManager` (`lingbot_map/layers/flashinfer_cache.py`) y hace OOM **al construir el manager**, antes de procesar ningún frame: `Tried to allocate 552.00 MiB`. Causa, verificada leyendo el código y recalculada:
+- Pool por bloque: `[max_num_pages, 2, page_size, num_heads, head_dim]` en bf16, preasignado completo.
+- `page_size = patches_per_frame = 1369` (518x518), `num_heads = 1024//64 = 16`, `head_dim = 64` → **5.35 MiB/página**.
+- `max_num_pages = (scale + sliding_window + 16) + (ceil(max_total_frames·6/page_size) + 16)` = `(2+64+16) + (5+16)` = **103** → **550.8 MiB/bloque** (coincide con el error).
+- `depth = 24` bloques (`aggregator/base.py:81`) → **12.91 GiB** solo de KV cache.
+
+**No hay configuración viable:** los márgenes fijos del código (`+16` páginas de patch, `+16` especiales) ya suman ~32 páginas × 5.35 MiB × 24 ≈ **4.1 GiB**, más los 3.2 GB del modelo. Achicar la ventana no alcanza; haría falta modificar `lingbot_map`. FlashInfer queda **descartado para esta GPU a esta resolución**, con evidencia (instalarlo no fue en vano: confirma que el problema de fondo es VRAM, no la falta del paquete).
+
+### El lever que sí funciona: `--kv_cache_sliding_window` (flag existente de `demo.py`)
+
+En el path SDPA, el OOM llegaba cuando el caché acumulaba **~26 frames** (consistente con los intentos previos y con el baseline landscape que moría en el frame 35 con 32% menos tokens por frame; y con `--mode windowed --window_size 32` fallando, ya que 32 > 26). `kv_cache_sliding_window` acota cuántos frames quedan en caché. Con ventana 16 + `num_scale_frames 2`, el máximo es 18 frames — por debajo del techo. Se expuso el flag en `scripts_webcam/process_and_view.py`.
+
+**Prueba de humo (60 frames, más del doble del techo anterior):** `--use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 --offload_to_cpu --keep_images_on_cpu` → **completa**, 35.0s de inferencia (**0.58 s/frame**, ~31× más rápido que CPU a esta resolución), **VRAM pico 7444 / 8188 MiB**, 1,402,314 puntos. El preview muestra geometría coherente con el video (plano del piso de baldosa + paredes blancas formando la esquina de un pasillo).
+
+**Costo explícito, no ocultar:** la ventana baja de 64 a 16 frames de contexto temporal para la estimación de pose. Es un cambio de parámetro del modelo (no de código), elegido porque es la única forma verificada de correr esta secuencia en esta GPU. Puede aumentar el drift en recorridos largos; **no se midió calidad geométrica**, y comparar contra una corrida CPU con ventana 64 sería el control natural si hace falta cuantificarlo.
+
+**Corrida completa (660 frames, GPU, `keyframe_interval=3` auto):** en curso al momento de escribir esto — resultados abajo cuando termine.
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
