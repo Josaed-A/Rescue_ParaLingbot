@@ -1430,6 +1430,34 @@ En el path SDPA, el OOM llegaba cuando el caché acumulaba **~26 frames** (consi
 
 **Corrida completa (660 frames, GPU, `keyframe_interval=3` auto):** en curso al momento de escribir esto — resultados abajo cuando termine.
 
+### Resultado: los 660 frames completos en GPU, con visor local (2026-09-14)
+
+```bash
+python3 scripts_webcam/process_and_view.py \
+  --image_folder captures/pruebas_reales/unisabana/prueba_1/frames \
+  --model_path checkpoints/lingbot-map.pt \
+  --use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 \
+  --offload_to_cpu --keep_images_on_cpu \
+  --glb_out captures/pruebas_reales/unisabana/prueba_1/exports/prueba_1.glb \
+  --preview_png captures/pruebas_reales/unisabana/prueba_1/exports/prueba_1_preview.png \
+  --port 8080
+```
+
+| Métrica | Valor |
+|---|---|
+| Frames | 660 (secuencia completa, 66s de video a 10fps) |
+| `keyframe_interval` (auto de `demo.py`) | 3 |
+| Tiempo de inferencia | **389.4s (0.59 s/frame)** |
+| VRAM pico (NVML, muestreo 1s) | **7482 / 8188 MiB** — prácticamente igual a la prueba de 60 frames (7444), la ventana contiene la memoria sin importar la longitud |
+| Puntos exportados | **13,952,693** |
+| Fallos | 0 |
+
+**Comparación de viabilidad para esta misma secuencia:** GPU a 518x518 con config default → OOM en el frame ~26; con FlashInfer → OOM antes del primer frame; CPU → funciona pero 18-21 s/frame (~4-8h estimadas). **GPU con ventana 16 → 660 frames en ~6.5 min**, ~31-35× más rápido que CPU.
+
+**Entregables:** `exports/prueba_1.glb`, `exports/prueba_1_preview.png`, `exports/run_gpu_full.log`, `exports/vram_full.txt` (muestreo crudo de VRAM). Visor `viser` dejado corriendo en `http://localhost:8080`.
+
+**Limitación que sigue abierta:** calidad geométrica/drift sin medir. La ventana 16 (vs 64 por defecto) reduce el contexto temporal de pose; en un recorrido de 66s por varios ambientes es donde más podría notarse. El control natural para cuantificarlo sería la misma secuencia en CPU con ventana 64 (~4-8h).
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
