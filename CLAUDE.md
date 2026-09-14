@@ -1402,6 +1402,10 @@ Agregados (todos flags existentes de `demo.py` o capacidades documentadas del mo
 
 **Estado: pendiente.** Faltan (a) confirmar que FlashInfer importa y que `numpy` sigue en 1.26.4 (fragilidad conocida), (b) reiniciar para recuperar CUDA, (c) reintentar los 660 frames en GPU **sin** `--use_sdpa`. Si FlashInfer no alcanza, el camino ya verificado es CPU a resolución completa (15 frames → 393,036 puntos, 18-21s/frame, ~4-8h para los 660).
 
+**Actualización (mismo día) — (a) verificado:** `flashinfer-python 0.6.18.post1` instalado e importa correctamente (con CUDA todavía roto emite `Failed to get device capability: CUDA unknown error` al importar — esperable, no es un fallo de la instalación). **`numpy` sigue en 1.26.4 y `torch` en 2.12.0+cu130 — la fragilidad conocida de numpy no se disparó esta vez.** Efectos secundarios del pip a vigilar: actualizó `cuda-bindings` 13.3.1→13.4.1 e instaló `cuda-python`, `nvidia-cutlass-dsl` (cu12+cu13), `nvidia-cudnn-frontend`, `apache-tvm-ffi`, `ninja`, y **`protobuf` 7.36.1** (posible impacto en `onnxruntime`/ONNX, a verificar). Reinicio autorizado explícitamente por el usuario para tras la verificación.
+
+**Chequeo post-instalación — sin roturas:** `onnxruntime 1.23.2`, `open3d 0.19.0`, `kaolin 0.18.0`, `cv2 4.13.0`, `lingbot_map`, `viser 1.1.0`, `trimesh 4.12.2` importan correctamente, y `skyseg_batch.onnx` carga con `onnxruntime.InferenceSession` — `protobuf` 7.x no afectó al pipeline de sky masking. Próximo paso: reinicio → reintento de los 660 frames en GPU sin `--use_sdpa` (FlashInfer).
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
