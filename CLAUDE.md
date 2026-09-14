@@ -1363,6 +1363,45 @@ captures/
 
 **Reorganización aplicada:** el video se movió a `captures/pruebas_reales/unisabana/prueba_1/source/muestra_unisabana.mp4`; se extrajeron **660 frames a 10fps** (`ffmpeg -vf fps=10`, no el `--video_path` de `demo.py` — se prefirió extraer nosotros mismos para mantener la estructura de carpetas propia) a `captures/pruebas_reales/unisabana/prueba_1/frames/`. Video: 66s, 1920x1080 nativo pero **portrait** (metadata de rotación -90°, confirmado que tanto `ffmpeg` como `cv2.VideoCapture` la aplican correctamente sin intervención — no hace falta `--rotate_clockwise_90`). Escena: recorrido indoor por pasillos de un edificio (sin cielo visible, `--mask_sky` no aplica).
 
+## Prueba long-sequence `pruebas_reales/unisabana` en GPU — 5 configuraciones fallidas + dependencia faltante (FlashInfer) encontrada (2026-09-14)
+
+**Pedido del usuario:** mapear los 660 frames de `captures/pruebas_reales/unisabana/prueba_1/` **en GPU**, con visualización local. Checkpoint principal (`lingbot-map.pt`) — `lingbot-map-stage1` se descartó antes: según el README es para cargarse en **VGGT** (repo separado de Facebook Research, inferencia bidireccional), no es el checkpoint para secuencias largas (el propio README anuncia ese modelo como "coming soon").
+
+### Hallazgo 1 — este video preprocesa a 518x518, no a 518x392
+
+`load_and_preprocess_images` en modo `crop` fija el ancho en 518 y **recorta la altura a 518** si la excede. Un video portrait (1080x1920) queda **518x518 = 37x37 = 1369 patches/frame**, vs **518x392 = 37x28 = 1036** de las escenas landscape del dataset oficial — **32% más tokens por frame**. Suficiente para que no entre en 8GB.
+
+### Hallazgo 2 — GPU a 518x518: OOM en las 5 configuraciones probadas
+
+| Config | Resultado |
+|---|---|
+| Default (`num_scale_frames=8`), 20 frames | OOM en la fase inicial de scale frames (`dpt_head.scratch_forward`) |
+| `num_scale_frames=2` + `offload_to_cpu`, 30 frames | OOM (`dpt_head._apply_pos_embed`) |
+| + imágenes mantenidas en CPU (`keep_images_on_cpu`) | OOM, mismo punto |
+| `demo.py --mode windowed --window_size 32` + `num_scale_frames=2` + `offload_to_cpu`, 120 frames | OOM, mismo punto |
+
+Dato decisivo: **`GPU mem after load: alloc=3.20 GB`** — el modelo solo ocupa 3.2GB de los 7.6GB usables. Los OOM consistentemente muestran ~7.1-7.2GB asignados por PyTorch fallando en asignaciones de 66-132MB. `windowed` tampoco alcanzó — consistente con que el pico lo domine el costo de atención/KV por frame, no la longitud acumulada. Traceback relevante del path SDPA: `lingbot_map/layers/attention.py:655 — k_cached = kv_cache[...].clone()` (duplica el KV cache transitoriamente en cada llamada).
+
+### Hallazgo 3 — `--image_size` no es un lever usable con este checkpoint (y el intento de desacoplarlo crasheó CUDA)
+
+- `demo.py --image_size 392` rompe la carga: `size mismatch for aggregator.patch_embed.pos_embed: [1, 1370, 1024] (checkpoint) vs [1, 785, 1024] (modelo)` — `--image_size` también define la construcción del modelo, y el checkpoint está fijo en la grilla 37x37.
+- Se desacopló en `scripts_webcam/process_and_view.py` (modelo a 518, preprocesamiento a 392 → 392x392 = grilla 28x28). **Resultado: `torch.AcceleratorError: CUDA error: unspecified launch failure`** en `attention.py:655` (KV cache). El caso landscape que sí funciona mantiene el **ancho** en 37 patches y solo varía el alto; reducir el ancho no parece seguro en el path streaming. **La opción se eliminó del script** (footgun).
+- **El crash dejó el contexto CUDA inutilizable**: `nvidia-smi` sano (idle, 39°C, sin procesos), pero `torch.cuda.is_available()==False` ("CUDA unknown error"). `nvidia-smi -r` requiere root → **necesita reinicio**.
+
+### Hallazgo 4 — bug de documentación en `demo.py`
+
+`--offload_to_cpu`: el `--help` dice *"(on by default)"* pero el código tiene `default=False`. No cambia conclusiones previas: el baseline GPU de 2026-08-25 (OOM en frame 35) usaba el comportamiento real (sin offload).
+
+### Hallazgo 5 — la dependencia que faltaba: **FlashInfer nunca se instaló** en esta máquina
+
+Toda la investigación en Linux corrió con `--use_sdpa` (fallback), porque los logs siempre decían `flashinfer not available`. El README lo lista como **recomendado**: *"FlashInfer provides paged KV cache attention for efficient streaming inference"* — el componente diseñado específicamente para la memoria del KV cache en GPU, que es exactamente donde fallan todos los intentos. Instalado vía `pip install --index-url https://pypi.org/simple flashinfer-python` (Python puro, JIT-compila kernels CUDA en el primer uso — usa el CUDA toolkit instalado el 2026-09-10). No se instaló el JIT cache opcional del README (es específico de cu128; esta máquina es cu130).
+
+### Cambios a `scripts_webcam/process_and_view.py` (no se tocó `demo.py` ni `lingbot_map`)
+
+Agregados (todos flags existentes de `demo.py` o capacidades documentadas del modelo): `--num_scale_frames`, `--offload_to_cpu` (replicando también el manejo post-inferencia de `demo.py`), `--keep_images_on_cpu` (`inference_streaming` está escrito para recibir imágenes en CPU y mover un slice por frame; `demo.py` las mueve todas igual), `--use_sdpa` (antes hardcodeado en `True`, lo que impedía usar FlashInfer). Eliminado: `--image_size` desacoplado (ver Hallazgo 3). Limpieza: `__pycache__/` removidos.
+
+**Estado: pendiente.** Faltan (a) confirmar que FlashInfer importa y que `numpy` sigue en 1.26.4 (fragilidad conocida), (b) reiniciar para recuperar CUDA, (c) reintentar los 660 frames en GPU **sin** `--use_sdpa`. Si FlashInfer no alcanza, el camino ya verificado es CPU a resolución completa (15 frames → 393,036 puntos, 18-21s/frame, ~4-8h para los 660).
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).

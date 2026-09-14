@@ -36,6 +36,29 @@ def main():
     p.add_argument("--port", type=int, default=8082)
     p.add_argument("--conf_threshold", type=float, default=1.5)
     p.add_argument("--downsample_factor", type=int, default=10)
+    p.add_argument("--keep_images_on_cpu", action="store_true",
+                    help="Leave the full image tensor on CPU instead of moving it "
+                         "to GPU up front (demo.py always moves it). "
+                         "inference_streaming is explicitly written for this -- it "
+                         "slices and moves one frame at a time, so GPU input memory "
+                         "becomes O(1) frames instead of O(sequence length).")
+    p.add_argument("--num_scale_frames", type=int, default=8,
+                    help="Bidirectional scale frames processed together in phase 1 "
+                         "(demo.py default 8). The README's 'Running on Limited GPU "
+                         "Memory' section recommends 2 to shrink that phase's "
+                         "activation peak -- needed for 518x518 (portrait-sourced) "
+                         "frames on an 8GB card, which OOM at the default 8.")
+    p.add_argument("--offload_to_cpu", action="store_true",
+                    help="Move per-frame predictions to CPU as they're produced "
+                         "(demo.py's own flag; its --help claims it's on by default "
+                         "but the actual argparse default is False). Cuts GPU peak "
+                         "memory growth over a long sequence.")
+    p.add_argument("--use_sdpa", action="store_true",
+                    help="Force PyTorch SDPA attention instead of FlashInfer "
+                         "(demo.py's own flag, default off). The SDPA streaming "
+                         "path clones the KV cache on every attention call; "
+                         "FlashInfer's paged KV cache is the memory-efficient path "
+                         "the README recommends for streaming on GPU.")
     p.add_argument("--no_serve", action="store_true",
                     help="Skip viewer.run() at the end (which never returns by "
                          "design, keeping the process alive to serve the viser "
@@ -59,8 +82,8 @@ def main():
     model_args = argparse.Namespace(
         model_path=args.model_path, image_size=518, patch_size=14,
         mode="streaming", enable_3d_rope=True, max_frame_num=1024,
-        num_scale_frames=8, kv_cache_sliding_window=64,
-        camera_num_iterations=1, use_sdpa=True, compile=False,
+        num_scale_frames=args.num_scale_frames, kv_cache_sliding_window=64,
+        camera_num_iterations=1, use_sdpa=args.use_sdpa, compile=False,
     )
     t0 = time.time()
     model = demo.load_model(model_args, device)
@@ -73,22 +96,39 @@ def main():
             print(f"Casting aggregator to {dtype}", flush=True)
             model.aggregator = model.aggregator.to(dtype=dtype)
 
-    images = images.to(device)
+    if not args.keep_images_on_cpu:
+        images = images.to(device)
     num_frames = images.shape[0]
     keyframe_interval = 1 if num_frames <= 320 else (num_frames + 319) // 320
     print(f"num_frames={num_frames} keyframe_interval={keyframe_interval} "
           f"dtype={dtype}", flush=True)
 
+    output_device = torch.device("cpu") if args.offload_to_cpu else None
+    print(f"num_scale_frames={args.num_scale_frames} "
+          f"offload_to_cpu={args.offload_to_cpu} use_sdpa={args.use_sdpa}", flush=True)
+
     t0 = time.time()
     with torch.no_grad(), torch.amp.autocast("cuda", dtype=dtype):
         predictions = model.inference_streaming(
-            images, num_scale_frames=8, keyframe_interval=keyframe_interval,
-            output_device=None,
+            images, num_scale_frames=args.num_scale_frames,
+            keyframe_interval=keyframe_interval,
+            output_device=output_device,
         )
     print(f"Inference done in {time.time()-t0:.1f}s "
           f"({(time.time()-t0)/num_frames:.2f}s/frame)", flush=True)
 
-    predictions, images_cpu = demo.postprocess(predictions, images)
+    # Mirrors demo.py main()'s own post-inference handling for offload_to_cpu:
+    # the GPU copy of the images is freed and the CPU copy that
+    # inference_streaming already produced is reused instead.
+    if args.offload_to_cpu:
+        del images
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        images_for_post = predictions["images"]
+    else:
+        images_for_post = images
+
+    predictions, images_cpu = demo.postprocess(predictions, images_for_post)
     vis_dict = demo.prepare_for_visualization(predictions, images_cpu)
 
     from lingbot_map.vis import PointCloudViewer
