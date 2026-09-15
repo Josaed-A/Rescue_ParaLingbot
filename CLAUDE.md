@@ -1486,6 +1486,23 @@ python3 scripts_webcam/process_and_view.py \
 
 Validar la hipótesis del punto 1 no requiere grabar nada: una secuencia landscape del dataset (`example/courthouse`, `university`) permite medir cuánto margen de VRAM se gana con los mismos flags.
 
+## Auditoría de dependencias contra el repo original `Robbyant/lingbot-map` (2026-09-14)
+
+**Pedido del usuario:** revisar dependencias, requisitos y entornos del original y reparar lo que falte o falle. Método: clon superficial del upstream en el scratchpad (sin tocar la config de este repo), diff de archivos, diff de historial e import real de cada dependencia declarada.
+
+**Archivos de dependencias/entorno — idénticos al original:** `pyproject.toml`, `demo_render/requirements.txt`, `demo_render/render_cuda_ext/setup.py`, `demo_render/process_videos.sh`, `benchmark/envs/install_{lingbot_map,bench,all}.sh`.
+
+**Código:** del upstream solo faltan 3 commits de **documentación** (2 revisiones del PDF del paper, 1 cambio del README; base común `1740f18`). Los 5 archivos que difieren son **arreglos propios intencionales**, no se revierten: `demo.py` (`mmap=True` + `del/gc.collect()` + dedup de imágenes para Windows), `lingbot_map/vis/point_cloud_viewer.py` y `utils.py` (API `matplotlib.colormaps`, la del original rompe en matplotlib ≥3.9), `.gitignore`. `README.md` falta porque lo borró `josae` (`eaef95e`) — intencional, no se restauró.
+
+**Reparado:**
+1. **`safetensors` no estaba instalado** (dependencia base del `pyproject.toml`) → `safetensors 0.8.0`.
+2. **`scipy` 1.8.0 del sistema, incompatible con `numpy` 1.26.4** (el warning `A NumPy version >=1.17.3 and <1.25.0 is required` de todas las corridas) → `scipy 1.14.1` en el user-site, instalado con constraint `numpy==1.26.4`. Verificado con warnings convertidos en errores: sin warning.
+3. **`pip install -e .` falla** (pip 22.0.2 / setuptools 59.6 del sistema no soportan editable PEP 660) → no se actualizó pip/setuptools (máquina compartida con workspaces de ROS2 que dependen de setuptools). En su lugar, link `.pth` acotado: `~/.local/lib/python3.10/site-packages/lingbot_map_dev.pth` → `~/.local/share/lingbot_map_dev/`, que contiene solo un symlink a `lingbot_map/`. `import lingbot_map` funciona desde cualquier carpeta y `demo` **no** queda expuesto como módulo global — mismo alcance que el editable del original.
+4. **Bug heredado del original en `lingbot_map/vis/utils.py`:** `get_vertical_colorbar()` usa `mpl.colors` / `mpl.colorbar` pero el upstream nunca define `mpl` (solo `import matplotlib.cm as cm`) → `NameError` al llamarla; la invoca `colorize()` y está exportada en `lingbot_map/vis/__init__.py`. Fix: `import matplotlib as mpl`. **No está corregido en upstream.**
+5. **Dependencias del benchmark** (`benchmark/envs/install_lingbot_map.sh`): `evo 1.37.1`, `OpenEXR 3.4.15`, `Imath` instalados con constraints (`numpy==1.26.4`, `scipy==1.14.1`, `matplotlib==3.10.9`) — no se movió ninguna de las tres.
+
+**Desvío intencional que se mantiene:** el original recomienda `torch==2.8.0+cu128`; esta máquina usa `torch 2.12.0+cu130`. Kaolin (compilado desde fuente), las extensiones de `render_cuda_ext`, FlashInfer y el CUDA toolkit 13.0 están alineados a esta versión — bajar torch los rompería. Tampoco se usa el conda env del original (todo en el user-site del Python 3.10 del sistema).
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
