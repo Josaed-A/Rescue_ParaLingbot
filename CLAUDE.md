@@ -35,6 +35,8 @@ RGB camera → LingBot-Map → depth + pose estimados → point cloud, tratando 
 
 **Actualización 2026-08-25 (más reciente) — Extensión de la campaña secuencial CPU a N=320:** mismo baseline CPU-forzado de la campaña de 5 fases, extendido más allá de N=200. `courthouse` no llega a 400 frames (286 máximo) ni `university` (324) — se usó `university` con N=320 (el máximo que se mantiene en `keyframe_interval=1`, evitando cruzar el umbral de auto-selección de `demo.py` en 320). **Resultado: la saturación de RAM y la estabilización de tiempo/frame se confirman con más fuerza todavía** — el análisis de deltas *marginales* dentro de la misma corrida (no solo acumulados) muestra ΔRAM/frame prácticamente cero (-0.34 a +9.16 MB/frame) y tiempo/frame marginal convergiendo a una constante (~21.3-21.6s/frame) desde el frame 100 en adelante. Ningún régimen nuevo aparece después de 200 frames — el mecanismo (`kv_cache_sliding_window=64`) sigue siendo la explicación consistente. Ver sección "Extensión de la campaña secuencial: N=320" más abajo (antes de la sección de GPU).
 
+**Actualización 2026-09-14 (más reciente) — primera secuencia larga de un sitio real procesada completa en GPU:** `captures/pruebas_reales/unisabana/prueba_1` (660 frames de un recorrido grabado con teléfono) corre entero en la GPU de 8GB en **389s (0.59 s/frame), VRAM pico 7482 MiB, 13.9M puntos**, con visor local verificado. FlashInfer quedó descartado con números (pool preasignado de 12.91 GiB); lo que lo hizo caber fue `--kv_cache_sliding_window 16` + `--num_scale_frames 2` + `--offload_to_cpu` + imágenes en CPU. Calidad limitada principalmente por el **formato portrait del video (el crop descarta ~44% de cada imagen)**, además de desenfoque y parámetros reducidos — recomendación: regrabar en landscape. Ver secciones "Nueva categoría: pruebas reales", "Prueba long-sequence `pruebas_reales/unisabana` en GPU" y "Post-reinicio: FlashInfer descartado..." más abajo.
+
 **Pendiente de decisión del usuario:** implementar el driver de captura de webcam en vivo (análisis ya hecho, nada implementado todavía), decidir si mitigar el techo de VRAM de la GPU antes de ese experimento (dado que a ~4 FPS el mismo OOM se alcanzaría en ~9 segundos de captura continua), continuar la campaña secuencial en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o recién ahí empezar la integración/optimización con Paragraphica.
 
 ## Estado del diagnóstico (ya hecho, no repetir)
@@ -1457,6 +1459,32 @@ python3 scripts_webcam/process_and_view.py \
 **Entregables:** `exports/prueba_1.glb`, `exports/prueba_1_preview.png`, `exports/run_gpu_full.log`, `exports/vram_full.txt` (muestreo crudo de VRAM). Visor `viser` dejado corriendo en `http://localhost:8080`.
 
 **Limitación que sigue abierta:** calidad geométrica/drift sin medir. La ventana 16 (vs 64 por defecto) reduce el contexto temporal de pose; en un recorrido de 66s por varios ambientes es donde más podría notarse. El control natural para cuantificarlo sería la misma secuencia en CPU con ventana 64 (~4-8h).
+
+**Visor local verificado:** abierto en Firefox (`http://localhost:8080`), conexión establecida con el servidor `viser` (PID del proceso de `process_and_view.py`). Con 13.9M puntos la escena tarda unos segundos en cargar; los sliders de *downsample* y umbral de confianza del panel permiten aligerarla.
+
+### Qué limita la calidad del resultado — análisis (2026-09-14, sin experimentos nuevos)
+
+**Pregunta del usuario:** ¿qué se necesita para mejorar el resultado, es problema de la muestra? **Respuesta: ambas cosas, con el formato del video como factor dominante.** El preview de los 660 frames muestra una trayectoria coherente de pasillos con giros, pero la vista lateral es una franja delgada y diagonal, consistente con deriva/escala imperfecta.
+
+**1. El formato portrait descarta ~44% de cada imagen (hallazgo de código, no supuesto).** `load_and_preprocess_images` en modo `crop` escala a 518 de ancho (1080x1920 → 518x924) y recorta la altura a 518 (`lingbot_map/utils/load_fn.py`, rama `crop`): se pierden 406 de 924 px verticales, justo la franja superior e inferior — paredes altas, techo, marcos de puertas — que es la estructura que más ayuda a estimar pose. Además, 518x518 da 1369 patches/frame vs 1036 en landscape (518x392), lo que obligó a todos los recortes de memoria de abajo.
+
+**2. La muestra en sí:** desenfoque por movimiento fuerte (caminata rápida, cámara de mano — visible en los frames inspeccionados), y la cámara apunta al piso buena parte del recorrido; las baldosas repetidas son textura ambigua para correspondencias entre frames.
+
+**3. Parámetros reducidos para caber en 8GB, cada uno con costo de calidad:**
+
+| Parámetro | Default | Usado | Efecto esperado |
+|---|---|---|---|
+| `kv_cache_sliding_window` | 64 | **16** | Menos contexto temporal → más drift en recorridos largos |
+| `num_scale_frames` | 8 | **2** | Estimación de escala inicial menos robusta |
+| `camera_num_iterations` | 4 (demo.py) | **1** | Menos refinamiento de pose (convención heredada de las campañas CPU por velocidad) |
+| `keyframe_interval` | auto | 3 (auto) | Menos frames en caché por unidad de tiempo |
+
+**Recomendación, en orden de impacto por esfuerzo (pendiente de decisión del usuario, nada ejecutado):**
+1. **Regrabar en landscape**, caminando despacio, cámara a la altura de los ojos, buena iluminación. Elimina el recorte del 44% y baja a 1036 tokens/frame (−26%), liberando VRAM.
+2. **Con ese video, subir parámetros hasta el techo de VRAM** (hoy a ~700 MiB del límite): ventana 32+, `num_scale_frames 8`, `camera_num_iterations 4`.
+3. **Corrida de control en CPU con defaults** (ventana 64, 8 scale frames, 4 iteraciones) sobre la misma secuencia para separar cuánto aporta la muestra vs la configuración — única forma de cuantificarlo, a costo de horas.
+
+Validar la hipótesis del punto 1 no requiere grabar nada: una secuencia landscape del dataset (`example/courthouse`, `university`) permite medir cuánto margen de VRAM se gana con los mismos flags.
 
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
