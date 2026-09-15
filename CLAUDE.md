@@ -1596,6 +1596,51 @@ sudo update-initramfs -u && sudo reboot
 ```
 Sin `sudo`: mantener el cargador conectado (en batería el equipo se suspende por inactividad) y no cerrar la tapa durante corridas; para corridas largas, envolver con `systemd-inhibit --what=sleep:idle:handle-lid-switch <comando>`.
 
+## Solución a futuro del "CUDA roto tras suspensión": chequeo automático + lanzador que bloquea la suspensión (2026-09-15)
+
+**Pedido del usuario:** que el fallo `CUDA-capable device(s) is/are busy or unavailable` / `CUDA unknown error` no vuelva a pasar. Esta sección **complementa** la guía de ejecución de arriba (no la reemplaza): los comandos de esa guía siguen siendo válidos, ahora conviene lanzarlos a través de `scripts_gpu/run_gpu.sh`.
+
+**Causa raíz (confirmada, no supuesta):** `/proc/driver/nvidia/params` → `PreserveVideoMemoryAllocations: 0`, y `/sys/power/suspend_stats/success` = 2 suspensiones desde el arranque. Con ese valor en 0, suspender con un proceso CUDA vivo (típicamente un visor olvidado) pierde la VRAM y deja `nvidia_uvm` inutilizable para todo proceso nuevo, aunque `nvidia-smi` se vea sano. Los servicios `nvidia-suspend/resume/hibernate` ya estaban habilitados por el paquete del driver — lo único que faltaba es el parámetro. En batería GNOME suspendía tras 20 min de inactividad (`sleep-inactive-battery-type 'suspend'`); con cargador ya estaba en `'nothing'`.
+
+### Tres capas de defensa
+
+| Capa | Qué hace | ¿Necesita sudo? | Estado |
+|---|---|---|---|
+| 1. `scripts_gpu/gpu_preflight.sh` | Chequea driver/NVML, procesos viejos de LingBot-Map (con `--kill-stale` los detiene), puerto del visor, CUDA usable en un proceso nuevo, protección de suspensión instalada y si está en batería. Imprime la solución exacta de cada falla. Exit 0 = listo | No | ✅ Creado y probado |
+| 2. `scripts_gpu/run_gpu.sh -- <comando>` | Corre el chequeo (toma el `--port` del comando; 8080 por defecto para `demo.py`, 8082 para `process_and_view.py`) y, si pasa, ejecuta el comando dentro de `systemd-inhibit --what=sleep:idle:handle-lid-switch --mode=block`: **ni la inactividad, ni el botón de suspender, ni cerrar la tapa suspenden el equipo mientras el proceso viva** (incluido el visor, que vive hasta `Ctrl+C`) | No | ✅ Creado y probado |
+| 3. `sudo scripts_gpu/fix_nvidia_suspend.sh && sudo reboot` | Escribe `/etc/modprobe.d/nvidia-power-management.conf` con `NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp` (759GB libres, sobra para 8GB de VRAM), `update-initramfs -u`, y recarga `nvidia_uvm` si nadie lo usa (recupera CUDA de inmediato). Con esto, **aunque la suspensión ocurra** (por ejemplo sin usar el lanzador), CUDA sobrevive | **Sí** — contraseña del usuario | ⏳ Pendiente de que el usuario lo corra |
+
+Además, sin sudo y ya aplicado: `gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'` (antes `'suspend'`). Revertir: mismo comando con `'suspend'`. No se tocó el cierre de tapa a nivel global (`lid-close-*-action` sigue en `'suspend'`, a propósito: suspender con la tapa cerrada es lo seguro en una laptop que se guarda en un bolso) — durante corridas lo bloquea `run_gpu.sh`.
+
+Revertir la capa 3: `sudo rm /etc/modprobe.d/nvidia-power-management.conf && sudo update-initramfs -u && sudo reboot`.
+
+### Uso (reemplaza al "Chequeo previo" manual de la guía)
+
+```bash
+scripts_gpu/gpu_preflight.sh                     # solo chequear
+scripts_gpu/gpu_preflight.sh --kill-stale        # chequear y cerrar visores/inferencias viejas
+
+scripts_gpu/run_gpu.sh -- python3 demo.py --model_path checkpoints/lingbot-map.pt \
+    --image_folder example/courthouse --mask_sky \
+    --use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 --offload_to_cpu
+
+scripts_gpu/run_gpu.sh --kill-stale -- python3 scripts_webcam/process_and_view.py \
+    --image_folder $D/frames --model_path checkpoints/lingbot-map.pt \
+    --use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 --offload_to_cpu --keep_images_on_cpu \
+    --glb_out $D/exports/prueba_${N}.glb --preview_png $D/exports/prueba_${N}_preview.png --port 8080
+```
+Lo que va después de `--` es exactamente el comando de la guía. Corridas en CPU (`CUDA_VISIBLE_DEVICES=""`) no necesitan el lanzador.
+
+### Pruebas hechas (con CUDA todavía roto — el escenario real)
+
+1. `gpu_preflight.sh --port 8080` → `[OK] GPU`, `[FALLA] CUDA: torch.cuda.is_available() == False`, 2 suspensiones detectadas, comando `rmmod/modprobe` impreso, aviso de protección no instalada; exit 1.
+2. `run_gpu.sh -- python3 demo.py ...` → se niega a lanzar (exit 1) y **no se detecta a sí mismo como proceso viejo** (el patrón está anclado al ejecutable `python`, y la línea de comando del wrapper empieza con `bash`).
+3. `fix_nvidia_suspend.sh` sin root → se niega (exit 1); `bash -n` sin errores de sintaxis. **No ejecutado con root** (sin contraseña en esta sesión).
+4. Proceso falso `python3 .../demo.py` → detectado y detenido por `--kill-stale`.
+5. `systemd-inhibit --what=sleep:idle:handle-lid-switch --mode=block` → aparece en `systemd-inhibit --list` como `LingBot-Map ... block` sin necesitar sudo.
+
+**No verificado todavía:** una suspensión real con la capa 3 activa (requiere que el usuario corra el script con sudo y reinicie; después, `grep PreserveVideoMemoryAllocations /proc/driver/nvidia/params` debe decir `1`).
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
