@@ -1,0 +1,3 @@
+# FlashInfer: KV cache paginado, se usa cuando demo.py corre SIN --use_sdpa.
+# Medido en este repo: preasigna ~12.9 GiB a 518x518, no cabe en GPUs de 8 GB.
+flashinfer-python

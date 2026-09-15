@@ -1,0 +1,6 @@
+# Visor viser, export GLB y demo.py --mask_sky (equivale al extra [vis] de pyproject.toml)
+viser
+trimesh
+matplotlib
+onnxruntime
+requests

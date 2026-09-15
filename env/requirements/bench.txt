@@ -1,0 +1,8 @@
+# benchmark/ (mismo set que benchmark/envs/install_lingbot_map.sh)
+open3d
+plyfile
+evo
+pyyaml
+OpenEXR
+Imath
+matplotlib

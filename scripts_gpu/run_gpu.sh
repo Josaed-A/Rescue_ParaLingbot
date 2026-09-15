@@ -38,6 +38,11 @@ if ! printf '%s\n' "${pre_args[@]}" | grep -qx -- --port; then
   [ -n "$port" ] && pre_args+=(--port "$port")
 fi
 
+# Probe CUDA with the interpreter the command itself will run
+case "$(basename "$1")" in
+  python*) PYTHON="$1"; export PYTHON ;;
+esac
+
 if ! "$here/gpu_preflight.sh" "${pre_args[@]}"; then
   echo "run_gpu.sh: pre-flight falló, no se lanza el comando." >&2
   exit 1

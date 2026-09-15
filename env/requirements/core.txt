@@ -1,0 +1,11 @@
+# Núcleo: lingbot_map + demo.py (sin visor).
+# torch/torchvision los instala setup_env.sh desde el índice de PyTorch: la variante
+# CUDA depende del driver de cada equipo. Instalar siempre con -c env/constraints.txt
+numpy
+scipy
+Pillow
+opencv-python
+einops
+safetensors
+huggingface_hub
+tqdm

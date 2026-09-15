@@ -24,3 +24,10 @@ results/
 results_gpu/
 captures/
 
+
+# descargas parciales / archivos rechazados de tools/fetch_assets.py
+*.part
+*.invalid
+
+# máscaras de cielo que genera demo.py --mask_sky junto a cada carpeta de imágenes
+*_sky_masks/

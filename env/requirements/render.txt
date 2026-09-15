@@ -1,0 +1,6 @@
+# demo_render/ (renderizador MP4 offline). Además, setup_env.sh --profiles render compila
+# demo_render/render_cuda_ext, compila Kaolin desde fuente y consigue ffmpeg.
+open3d
+pyyaml
+onnxruntime-gpu
+aiohttp

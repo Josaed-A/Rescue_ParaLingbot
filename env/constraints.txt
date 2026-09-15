@@ -1,0 +1,49 @@
+# Versiones validadas JUNTAS en la máquina de referencia (Ubuntu 22.04, Python 3.10,
+# RTX 2000 Ada 8 GB, driver 580). Única fuente de verdad de versiones del repo.
+#
+# Todo pip install de este repo usa "-c env/constraints.txt": si un paquete intenta
+# arrastrar otra versión (típicamente numpy 2.x, que rompe scipy y kaolin), pip falla
+# en vez de romper el entorno en silencio.
+#
+# Para actualizar una versión: probarla en un entorno aparte, correr
+# tools/doctor.py --profiles all y recién ahí editar esta línea.
+
+# --- core ---
+torch==2.12.0              # variante CUDA (cu130/cu126/cpu) la elige setup_env.sh según el driver
+torchvision==0.27.0
+numpy==1.26.4              # < 2: scipy 1.14 y kaolin compilados contra la ABI 1.x
+scipy==1.14.1              # 1.8 del sistema Ubuntu es incompatible con numpy 1.26
+Pillow==12.3.0             # >= 9.1 (Image.Resampling)
+opencv-python==4.11.0.86   # 4.12+ declara numpy>=2
+einops==0.8.2
+safetensors==0.8.0
+huggingface_hub==1.28.0
+tqdm==4.67.3
+
+# --- vis ---
+viser==1.1.0
+trimesh==4.12.2
+matplotlib==3.10.9         # >= 3.9: API matplotlib.colormaps usada en lingbot_map/vis
+onnxruntime==1.23.2
+
+# --- gpu ---
+nvidia-ml-py==13.610.43
+
+# --- flashinfer ---
+flashinfer-python==0.6.18.post1
+
+# --- render ---
+open3d==0.19.0
+pyyaml==6.0.2
+onnxruntime-gpu==1.23.2
+aiohttp==3.14.3            # demo_render/interactive_viewer
+# kaolin: commit fijado en setup_env.sh (KAOLIN_REF), no está en PyPI
+
+# --- bench ---
+evo==1.37.1
+OpenEXR==3.4.15
+Imath==0.0.2
+plyfile==1.1               # 1.1.5 declara numpy>=2
+
+# --- transitivas que ya rompieron algo o conviene fijar ---
+protobuf==7.36.1

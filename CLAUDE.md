@@ -1641,6 +1641,61 @@ Lo que va después de `--` es exactamente el comando de la guía. Corridas en CP
 
 **No verificado todavía:** una suspensión real con la capa 3 activa (requiere que el usuario corra el script con sudo y reinicie; después, `grep PreserveVideoMemoryAllocations /proc/driver/nvidia/params` debe decir `1`).
 
+## Portabilidad: instalación modular reproducible + dependencias rotas reparadas (2026-09-15)
+
+**Pedido del usuario:** que el repo sea compatible con migraciones a otro equipo, revisar dependencias rotas y hacer la instalación modular. **Guía para quien instala: [SETUP.md](SETUP.md).** Esta sección es el registro técnico.
+
+**Capa 3 de la sección anterior, aplicada por el usuario:** corrió `sudo scripts_gpu/fix_nvidia_suspend.sh` y reinició. Verificado: `PreserveVideoMemoryAllocations: 1` y CUDA usable (su `demo.py` corrió en GPU justo después). Es permanente: no hay que repetirlo al encender.
+
+### Dependencias rotas encontradas y reparadas en la máquina de referencia
+
+| Paquete | Problema | Arreglo |
+|---|---|---|
+| `opencv-python` 4.13.0.92 | Declara `numpy>=2`; estaba instalado a la fuerza con numpy 1.26.4. En un equipo nuevo pip lo rechaza o sube numpy a 2.x (rompe scipy 1.14 y kaolin) | **4.11.0.86** (la misma que fija `demo_render/requirements.txt` del upstream) |
+| `plyfile` 1.1.5 | Declara `numpy>=2` (dependencia de kaolin) | **1.1** (`numpy>=1.21`) |
+| `aiohttp` | Faltaba; lo importa `demo_render/interactive_viewer/server.py` | **3.14.3** |
+
+Verificado después: `pip check` sin conflictos de paquetes del repo; `cv2.VideoCapture` lee el mp4 de unisabana e `imwrite` funciona; corrida CPU de 3 frames de `courthouse` con GLB (40,274 puntos) y preview.
+
+### Qué ataba el repo a esta máquina
+
+1. **Versiones sin fijar:** `pyproject.toml` no fija nada y numpy 1.26.4 se sostenía a mano (ya se había roto una vez al instalar Kaolin).
+2. **Link `.pth` con ruta absoluta** a `/home/semillero/Rescue_ParaLingbot`: se rompe al mover o clonar el repo en otra carpeta.
+3. **Extensiones `.so` compiladas** para Python 3.10 + torch 2.12 + CUDA 13 de este equipo, y Kaolin compilado desde un commit concreto (`d52da9f`, **no** el tag `v0.18.0`).
+4. **Modelos (4.8 GB) fuera de git**, con el throttling de Hugging Face ya documentado.
+5. **Herramientas fuera del repo:** CUDA toolkit en `~/cuda-13.0`, ffmpeg en `~/.local/bin`.
+6. **ROS2 en `PYTHONPATH`:** los shells de esta máquina cargan ROS2, que exporta 204 carpetas de site-packages. Se cuelan en cualquier venv (`include-system-site-packages=false` no alcanza), así que un paquete de ROS2 podría tapar uno del repo.
+7. **Flags dependientes del hardware:** los de 8 GB solo valen para esta GPU.
+
+### Estructura nueva
+
+| Archivo | Qué hace |
+|---|---|
+| `env/constraints.txt` | Única fuente de versiones validadas juntas. Todo `pip install` usa `-c`: si algo intenta subir numpy a 2.x, pip falla en vez de romper en silencio |
+| `env/requirements/{core,vis,gpu,flashinfer,render,bench}.txt` | Qué instala cada perfil |
+| `env/assets.json` | Modelos: repo HF, destino, tamaño y SHA256 (los tres coinciden con `x-linked-etag` de Hugging Face) |
+| `setup_env.sh` | Instalador sin sudo. Modo `venv` (defecto) o `user`. Elige torch cu130/cu126/cpu según el driver. Instala perfiles, rehace el link del paquete (`pip -e` en venv, `.pth` en modo user), compila extensiones y Kaolin, consigue ffmpeg y el toolkit (`--install-cuda-toolkit`), trae modelos y corre el doctor. Ignora `PYTHONPATH` al instalar. `--dry-run` muestra el plan |
+| `tools/fetch_assets.py` | Solo stdlib. Copia desde `--source-dir` o descarga (HF → hf-mirror si va a menos de 200 KB/s), reanuda `.part`, verifica SHA256 y aparta archivos corruptos como `.invalid` |
+| `tools/doctor.py` | Solo stdlib (imports pesados en procesos hijos). Revisa Python, versiones contra constraints, `pip check`, imports (incluido el aviso de ABI de numpy), paquetes tapados por `PYTHONPATH`, que `lingbot_map` sea esta copia, CUDA contra el mínimo del driver, VRAM → flags recomendados, modelos, toolkit/extensiones/ffmpeg y suspensión. Cada FALLA trae su comando |
+| `scripts_gpu/run_gpu.sh` | Ahora pasa el intérprete del comando (p. ej. `.venv/bin/python`) al chequeo de CUDA |
+
+### Pruebas
+
+1. **Doctor antes del arreglo** (`--profiles all`): detectó exactamente los 3 problemas de la tabla (4 FALLA, 3 AVISO). **Después:** 67 OK, 1 AVISO (FlashInfer no cabe en 8 GB, esperado), 0 FALLA.
+2. **`fetch_assets.py`:** copia desde otra carpeta; descarga real de `skyseg.onnx` desde huggingface.co; archivo truncado rechazado, apartado como `.invalid` y reparado; `--verify` con SHA256 de los tres modelos.
+3. **`setup_env.sh --dry-run`** en varios escenarios (venv, user+all, render cu126 sin toolkit 12.x → error con instrucciones, perfil inválido). Encontró un bug propio, corregido: los metadatos de torch dicen `2.12.0` sin `+cu130`, así que en modo user iba a forzar la reinstalación de torch. Ahora se lee `torch.__version__`.
+4. **Instalación desde cero** (`setup_env.sh --venv <scratchpad> --skip-assets`, perfiles core,vis,gpu): exit 0; doctor en el venv nuevo 44 OK, 0 AVISO, 0 FALLA; 5.3 GB. Corrida CPU de 3 frames con el venv: mismo resultado que el sistema (40,274 puntos). Mostró que el paso de torch arrastraba numpy 2.2.6 de forma transitoria (el paso siguiente lo bajaba a 1.26.4). Corregido pasando `-c constraints` también a ese paso: el índice de PyTorch tiene numpy 1.26.4 para cu130, cu126 y cpu. **Segunda instalación desde cero, solo `core`**, para validar ese arreglo: en ningún paso se instaló otro numpy que 1.26.4, y no apareció el falso error del resolver de pip (el `PYTHONPATH` de ROS2 ya se ignora). Destapó un bug de modularidad del doctor: siempre importaba `lingbot_map.vis`, que necesita matplotlib (perfil `vis`), y daba una FALLA falsa con solo `core`. Corregido (solo se prueba con `vis`); re-verificado: core-only 28 OK / 0 FALLA, esta máquina con `all` 67 OK / 1 AVISO / 0 FALLA. `core` sí alcanza para `demo.py`: el import del visor (`demo.py:598-615`) está en un `try/except ImportError` que imprime las predicciones en vez de abrir `viser`.
+5. **Caso ROS2 provocado:** un `einops` falso en `PYTHONPATH` → doctor da AVISO con la ruta y además la FALLA consecuente de `lingbot_map.models.gct_stream`.
+6. **`run_gpu.sh` con el Python del venv:** el chequeo de CUDA usó ese intérprete.
+7. **Inferencia GPU con el venv nuevo, a través de `run_gpu.sh`** (40 frames de `courthouse`, flags de 8 GB + `--keep_images_on_cpu`, `--no_serve`): chequeo previo LISTO, aggregator en bf16, **0.26 s/frame**, 479,298 puntos exportados, **VRAM pico 5484 MiB**, exit 0.
+
+**Incidente durante las pruebas (sin consecuencias):** la prueba 6 esperaba que el lanzador se negara porque el visor del usuario ocupaba la GPU, pero ese proceso ya había terminado, así que `run_gpu.sh` lanzó de verdad el `demo.py` de prueba. Terminó solo; se verificó que no quedaron procesos, bloqueos de suspensión, VRAM ni el puerto 8080 ocupados. Al revisarlo se repitió el problema conocido de `pgrep -f`, que se encuentra a sí mismo en la línea de comando: usar siempre patrones anclados al ejecutable (`'^[^ ]*python...'`).
+
+### No probado (explícito)
+
+- Perfiles `render`, `bench` y `flashinfer` en un venv desde cero: la compilación de Kaolin y la descarga del toolkit solo se validaron en esta máquina, cuando se instalaron el 2026-09-10/14. `--install-cuda-toolkit` solo en `--dry-run`.
+- Un segundo equipo físico, y Windows (los comandos de SETUP.md están verificados contra el índice de PyTorch, pero no ejecutados).
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).

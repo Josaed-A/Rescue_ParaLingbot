@@ -66,8 +66,9 @@ if [ -n "$PORT" ] && ss -tln 2>/dev/null | awk '{print $4}' | grep -q ":$PORT\$"
   ok=0
 fi
 
-# 3. CUDA usable from a fresh process
-if cuda_out=$(python3 - 2>&1 <<'EOF'
+# 3. CUDA usable from a fresh process of the same interpreter the command will use
+#    (run_gpu.sh exports PYTHON from the command's first word, e.g. .venv/bin/python)
+if cuda_out=$("${PYTHON:-python3}" - 2>&1 <<'EOF'
 import warnings
 warnings.filterwarnings("ignore")
 import torch

@@ -1,0 +1,3 @@
+# Monitoreo de RAM/VRAM usado por scripts_gpu/ y scripts_seq/
+psutil
+nvidia-ml-py
