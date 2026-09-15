@@ -1503,6 +1503,99 @@ Validar la hipótesis del punto 1 no requiere grabar nada: una secuencia landsca
 
 **Desvío intencional que se mantiene:** el original recomienda `torch==2.8.0+cu128`; esta máquina usa `torch 2.12.0+cu130`. Kaolin (compilado desde fuente), las extensiones de `render_cuda_ext`, FlashInfer y el CUDA toolkit 13.0 están alineados a esta versión — bajar torch los rompería. Tampoco se usa el conda env del original (todo en el user-site del Python 3.10 del sistema).
 
+## Guía de ejecución de este repositorio (comandos que funcionan en esta máquina) — 2026-09-15
+
+**Por qué existe esta sección:** los comandos del README original (`Robbyant/lingbot-map`) no funcionan copiados tal cual en esta máquina. Tres motivos, todos vistos en la práctica: usan rutas *placeholder* (`/path/to/lingbot-map.pt`); la GPU de 8GB no alcanza con la configuración por defecto; y hay problemas de entorno propios de este equipo (suspensión, procesos colgados). Todos los comandos se corren desde la raíz del repo: `cd ~/Rescue_ParaLingbot`.
+
+### Archivos que tienen que existir
+
+| Archivo | Para qué | Estado |
+|---|---|---|
+| `checkpoints/lingbot-map.pt` (4.4GB) | Checkpoint principal — **reemplaza a `/path/to/lingbot-map.pt` del README** | Presente (gitignored) |
+| `skyseg.onnx` (168MB, raíz) | `demo.py --mask_sky` | Presente (descargado 2026-09-15, gitignored) |
+| `skyseg_batch.onnx` (168MB, raíz) | Sky masking de `demo_render/batch_demo.py` (no lo usa `demo.py`) | Presente (gitignored) |
+
+### 1. Chequeo previo (10 segundos, evita los errores más comunes)
+
+```bash
+nvidia-smi --query-compute-apps=pid,used_memory --format=csv   # ¿otro proceso tiene la GPU?
+ss -tlnp | grep ':8080 '                                        # ¿hay un visor viejo en el puerto?
+python3 -c "import torch; print('CUDA OK' if torch.cuda.is_available() else 'CUDA ROTO')"
+```
+Si aparece un proceso Python o el puerto ocupado → ver "Detener un visor". Si dice `CUDA ROTO` → ver tabla de problemas.
+
+### 2. `demo.py` — escenas de ejemplo (equivalente al README original)
+
+```bash
+# GPU (8GB): flags necesarios para que no se quede sin VRAM en secuencias largas
+python3 demo.py --model_path checkpoints/lingbot-map.pt \
+    --image_folder example/courthouse --mask_sky \
+    --use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 --offload_to_cpu
+
+# CPU (sin GPU o con CUDA roto): lento (~6-20 s/frame) pero sin límite de VRAM
+CUDA_VISIBLE_DEVICES="" python3 demo.py --model_path checkpoints/lingbot-map.pt \
+    --image_folder example/courthouse --mask_sky --use_sdpa --camera_num_iterations 1
+```
+Escenas disponibles: `example/courthouse` (286), `example/university` (324), `example/loop` (237). `--first_k N` para usar solo los primeros N frames. Visor en `http://localhost:8080`; `--port 8081` si el 8080 está ocupado. **No usar FlashInfer** (sin `--use_sdpa`) en esta GPU: su pool preasignado pide 12.9 GiB (ver sección "Post-reinicio").
+
+### 3. Pruebas reales desde un video (convención `captures/pruebas_reales/<sitio>/prueba_N/`)
+
+```bash
+SITE=unisabana; N=1; D=captures/pruebas_reales/$SITE/prueba_$N
+mkdir -p $D/source $D/frames $D/exports
+cp /ruta/al/video.mp4 $D/source/
+ffmpeg -i $D/source/video.mp4 -vf fps=10 -start_number 0 $D/frames/%06d.png
+
+python3 scripts_webcam/process_and_view.py \
+    --image_folder $D/frames --model_path checkpoints/lingbot-map.pt \
+    --use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 \
+    --offload_to_cpu --keep_images_on_cpu \
+    --glb_out $D/exports/prueba_${N}.glb --preview_png $D/exports/prueba_${N}_preview.png --port 8080
+```
+`process_and_view.py` hace lo mismo que `demo.py` y además exporta `.glb` + preview PNG. `--no_serve` para no dejar el visor abierto. **Grabar en horizontal**: un video vertical pierde ~44% de cada imagen por el recorte a 518x518.
+
+### 4. Webcam de esta máquina (convención `captures/<dispositivo>/prueba_N/`)
+
+```bash
+D=captures/local_test/prueba_2; mkdir -p $D/frames $D/exports
+python3 scripts_webcam/capture_frames.py --num_frames 20 --out_dir $D/frames --fps 5
+python3 scripts_webcam/process_and_view.py --image_folder $D/frames \
+    --model_path checkpoints/lingbot-map.pt --use_sdpa \
+    --glb_out $D/exports/prueba_2.glb --preview_png $D/exports/prueba_2_preview.png --port 8080
+```
+
+### 5. Detener un visor
+
+El visor **no termina solo** (queda sirviendo para siempre, a propósito). Mientras vive retiene VRAM y el puerto — un visor olvidado hace fallar la corrida siguiente.
+```bash
+ss -tlnp | grep ':8080 '        # muestra el pid
+kill <pid>                      # o: pkill -f process_and_view.py / pkill -f "demo.py"
+```
+En la terminal donde se lanzó, `Ctrl+C` alcanza.
+
+### Problemas conocidos y solución
+
+| Síntoma | Causa | Solución |
+|---|---|---|
+| `FileNotFoundError: /path/to/lingbot-map.pt` | Placeholder del README original | Usar `checkpoints/lingbot-map.pt` |
+| `CUDA error: CUDA-capable device(s) is/are busy or unavailable` | Otro proceso tiene la GPU, o el contexto CUDA quedó roto | Chequeo previo (paso 1); detener visores viejos; si sigue, la fila siguiente |
+| `CUDA unknown error` / `torch.cuda.is_available() == False` con `nvidia-smi` sano | **Suspensión/reanudación del equipo con procesos CUDA vivos** (confirmado 2026-09-14 22:12: `PreserveVideoMemoryAllocations=0`) | `sudo rmmod nvidia_uvm && sudo modprobe nvidia_uvm` (sin reiniciar), o reiniciar |
+| `Failed to initialize NVML: Driver/library version mismatch` | Actualización automática del driver sin recargar el módulo | Reiniciar |
+| `torch.OutOfMemoryError: CUDA out of memory` | VRAM de 8GB | Flags `--use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 --offload_to_cpu`; o CPU |
+| `OSError: [Errno 98] Address already in use` al abrir el visor | Visor viejo en el mismo puerto | Detenerlo (paso 5) o `--port 8081` |
+| `ValueError: numpy.dtype size changed` | Algún `pip install` subió numpy a 2.x | `python3 -m pip install --user numpy==1.26.4` |
+| `ModuleNotFoundError: lingbot_map` fuera del repo | Link `.pth` borrado | Ver sección "Auditoría de dependencias" (link en `~/.local/share/lingbot_map_dev`) |
+| Warning `Failed to load pretrained weights: [Errno 2] ''` | Benigno (precarga opcional de DINOv2) | Ignorar |
+
+### Evitar que la suspensión rompa CUDA (requiere `sudo`, no aplicado)
+
+Los servicios `nvidia-suspend`/`nvidia-resume` están habilitados pero sin preservar memoria de video. Solución permanente recomendada por NVIDIA:
+```bash
+echo 'options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp' | sudo tee /etc/modprobe.d/nvidia-power-management.conf
+sudo update-initramfs -u && sudo reboot
+```
+Sin `sudo`: mantener el cargador conectado (en batería el equipo se suspende por inactividad) y no cerrar la tapa durante corridas; para corridas largas, envolver con `systemd-inhibit --what=sleep:idle:handle-lid-switch <comando>`.
+
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
 2. Confirmar CPU/RAM/GPU/SO disponibles (ya hecho: sin GPU).
