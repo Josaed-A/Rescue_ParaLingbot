@@ -1,6 +1,6 @@
 """Test weight-only INT8 dynamic quantization for GCTStream.aggregator —
 isolated experiment, does NOT touch demo.py or the production pipeline.
-See CLAUDE.md, "Análisis: viabilidad de cuantización INT8 weight-only", for
+See README.md, "Análisis: viabilidad de cuantización INT8 weight-only", for
 the code-level analysis behind this design.
 
 Strategy (confirmed viable by static analysis before writing this script):

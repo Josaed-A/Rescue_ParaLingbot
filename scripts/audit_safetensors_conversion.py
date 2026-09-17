@@ -1,5 +1,5 @@
 """Checkpoint-level investigation of safetensors as a storage/loading
-alternative for lingbot-map.pt — see CLAUDE.md, "Investigación: conversión a
+alternative for lingbot-map.pt — see README.md, "Investigación: conversión a
 safetensors", for context and results.
 
 Scope (deliberately limited, per instruction — does NOT touch demo.py, does
@@ -15,7 +15,7 @@ NOT run the 10-image campaign, does NOT re-instantiate GCTStream):
      sections above — so key compatibility does not need to be re-derived by
      re-instantiating the model here).
 
-Pre-check already done manually (see CLAUDE.md): 1342 tensors, all
+Pre-check already done manually (see README.md): 1342 tensors, all
 torch.float32, 0 non-contiguous, 0 shared-storage groups — no known
 safetensors blockers going in.
 """

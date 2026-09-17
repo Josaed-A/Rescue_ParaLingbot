@@ -3,7 +3,7 @@
 Reuses the real `demo.load_model` / `demo.load_images` and the real
 `model.inference_streaming` — this script does not modify demo.py or any file
 under lingbot_map/. It only wires them together with the same arguments the
-documented CPU baseline in CLAUDE.md used (--use_sdpa, --camera_num_iterations 1),
+documented CPU baseline in README.md used (--use_sdpa, --camera_num_iterations 1),
 plus the memory/timing instrumentation from monitor.py.
 
 CPU is forced by the CALLER via CUDA_VISIBLE_DEVICES="" in the subprocess
@@ -30,7 +30,7 @@ from scripts_seq.monitor import MemoryMonitor  # noqa: E402
 
 def build_args(model_path):
     """Mirrors demo.py's argparse defaults, pinned to the values the documented
-    CPU baseline commands in CLAUDE.md always passed explicitly."""
+    CPU baseline commands in README.md always passed explicitly."""
     ns = argparse.Namespace()
     ns.model_path = model_path
     ns.image_size = 518
@@ -40,8 +40,8 @@ def build_args(model_path):
     ns.max_frame_num = 1024
     ns.num_scale_frames = 8
     ns.kv_cache_sliding_window = 64
-    ns.camera_num_iterations = 1     # matches CLAUDE.md baseline commands
-    ns.use_sdpa = True               # matches CLAUDE.md baseline commands
+    ns.camera_num_iterations = 1     # matches README.md baseline commands
+    ns.use_sdpa = True               # matches README.md baseline commands
     ns.compile = False
     ns.keyframe_interval = None      # auto: 1 for num_frames <= 320 (all our N are)
     ns.offload_to_cpu = False
@@ -64,7 +64,7 @@ def main():
 
     assert not torch.cuda.is_available(), (
         "This script must run with CUDA hidden (CUDA_VISIBLE_DEVICES='') to preserve "
-        "the FP32 CPU baseline documented in CLAUDE.md — refusing to run on GPU."
+        "the FP32 CPU baseline documented in README.md — refusing to run on GPU."
     )
     device = torch.device("cpu")
 

@@ -1,7 +1,7 @@
 """Test safetensors as a peak-reducing loading strategy for
 demo.py::load_model() — isolated experiment, mirrors the exact methodology
 of scripts/measure_load_mmap.py (the mmap=True baseline: 13055.6MB peak,
-174.5MB min free RAM, ~110.6s total). See CLAUDE.md, "Investigación:
+174.5MB min free RAM, ~110.6s total). See README.md, "Investigación:
 conversión a safetensors", for the checkpoint-level verification that
 preceded this (bit-exact conversion, 0 shared-storage tensors).
 

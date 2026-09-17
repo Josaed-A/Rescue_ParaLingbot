@@ -1,7 +1,7 @@
 """High-frequency external memory monitor for the sequential-campaign experiments.
 
 Linux equivalent of the Windows `measure_ram.ps1` used in the earlier rounds of this
-investigation (see CLAUDE.md). Runs as a background thread inside the SAME process
+investigation (see README.md). Runs as a background thread inside the SAME process
 that does load_model()/inference_streaming() (there's nothing to attach to externally
 without extra privileges the way the Windows ctypes/CIM approach did), sampling at a
 fixed wall-clock interval so it captures memory during the monolithic
@@ -103,7 +103,7 @@ class MemoryMonitor:
                 # Hard exit: a background thread can't safely unwind a torch call on
                 # the main thread, and the whole point is to not wait around for the
                 # kernel OOM killer (which is what produced the Windows APPCRASH
-                # earlier in this investigation, see CLAUDE.md).
+                # earlier in this investigation, see README.md).
                 os._exit(75)  # EX_TEMPFAIL-ish, distinct from a plain crash (137/-9)
             self._stop.wait(self.interval_s)
 

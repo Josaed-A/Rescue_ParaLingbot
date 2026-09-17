@@ -1,5 +1,5 @@
 """Verify the del+gc.collect() fix in demo.py::load_model() against the
-2026-08-23 baseline (see CLAUDE.md, "Reporte: prueba aislada de load_model()").
+2026-08-23 baseline (see README.md, "Reporte: prueba aislada de load_model()").
 
 Unlike scripts/measure_load_only.py (a standalone reimplementation of the
 load sequence, used to find WHERE the peak was), this script imports and

@@ -1,7 +1,7 @@
 """Detailed single-run GPU/NVIDIA baseline for LingBot-Map.
 
 Unlike scripts_seq/run_single.py (which forced CPU to preserve the FP32 baseline
-for the sequential-characterization campaign, see CLAUDE.md), this script does
+for the sequential-characterization campaign, see README.md), this script does
 NOT touch CUDA_VISIBLE_DEVICES -- it reuses demo.load_model()/demo.load_images()
 unmodified and replicates demo.py main()'s own device/dtype/aggregator-cast logic
 verbatim, so "the baseline" here is exactly what `python demo.py` would do on

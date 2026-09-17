@@ -1,5 +1,5 @@
 """Test `device="meta"` + `load_state_dict(assign=True)` as a peak-reducing
-loading strategy for demo.py::load_model() — see CLAUDE.md, "Fix aplicado y
+loading strategy for demo.py::load_model() — see README.md, "Fix aplicado y
 verificado" section, for why the del+gc.collect() fix does not touch the
 peak, and this experiment's design rationale.
 

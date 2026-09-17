@@ -12,7 +12,7 @@ rope3d, resnet mean/std buffers):
   - parameter count, dtype(s), parameter memory (bytes, from numel*elemsize)
   - buffer memory (persistent + non-persistent, via module.buffers())
   - "other tensors" not caught by the nn.Module system (rope3d.freqs, a
-    plain attribute — see CLAUDE.md "Experimento: device=meta" for why this
+    plain attribute — see README.md "Experimento: device=meta" for why this
     one is special)
 
 Cross-checks the sum of all live tensors reachable via gc.get_objects()
@@ -190,7 +190,7 @@ def print_component_table(model):
                 f"{'-':>10s} {dp_mb:10.1f} {db_mb:10.1f}",
                 flush=True,
             )
-            # The known non-buffer plain attribute: rope3d.freqs (see CLAUDE.md)
+            # The known non-buffer plain attribute: rope3d.freqs (see README.md)
             rope3d = getattr(top_mod, "rope3d", None)
             freqs = getattr(rope3d, "freqs", None) if rope3d is not None else None
             if torch.is_tensor(freqs):

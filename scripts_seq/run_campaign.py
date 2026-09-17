@@ -21,7 +21,7 @@ RESULTS_JSONL = os.path.join(REPO_ROOT, "results", "campaign_results.jsonl")
 JSON_DIR = os.path.join(REPO_ROOT, "results", "json")
 CSV_DIR = os.path.join(REPO_ROOT, "results", "csv")
 
-# (num_frames, num_repetitions) — matches the campaign design in CLAUDE.md.
+# (num_frames, num_repetitions) — matches the campaign design in README.md.
 TIERS = [(25, 5), (50, 5), (100, 3), (200, 3)]
 
 # Per-run timeout. Phases 1-4 (N=10/25/50/100) showed inference time is NOT linear

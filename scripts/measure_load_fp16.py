@@ -1,6 +1,6 @@
 """Test FP16 precision reduction for GCTStream.aggregator as a memory-saving
 strategy — isolated experiment, does NOT touch demo.py or the production
-pipeline. See CLAUDE.md, "Análisis: reducción de precisión a FP16", for the
+pipeline. See README.md, "Análisis: reducción de precisión a FP16", for the
 code-level analysis behind the safe/unsafe boundary used here.
 
 Boundary used (NOT a guess — matches the boundary already implemented by
@@ -12,7 +12,7 @@ the model's authors for GPU inference, demo.py lines 467-471):
     gct_base.py's _predict_camera/_predict_depth for ALL dtypes.
 
 Known extra risk versus the authors' GPU validation (documented in
-CLAUDE.md): production always wraps this cast in `torch.amp.autocast('cuda',
+README.md): production always wraps this cast in `torch.amp.autocast('cuda',
 dtype=dtype)`, which auto-upcasts sensitive ops (LayerNorm, softmax) even
 with fp16/bf16 weights. `torch.amp.autocast` on CPU only supports
 bfloat16, not float16 — so this experiment runs fp16 math WITHOUT that

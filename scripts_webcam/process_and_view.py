@@ -11,7 +11,7 @@ CALLER via CUDA_VISIBLE_DEVICES="" (must be set before the interpreter starts),
 matching the sequential-campaign baseline that's already validated up to
 N=320 without failures -- the GPU baseline OOMs around frame 35 with the
 unmodified config, so CPU is the only proven-safe path to a real 400-frame
-run (see CLAUDE.md).
+run (see README.md).
 
 After exporting the GLB, also renders a quick static PNG preview (matplotlib
 3D scatter, no GPU/EGL context needed) so there's something viewable without
@@ -44,7 +44,7 @@ def main():
                          "becomes O(1) frames instead of O(sequence length).")
     p.add_argument("--num_scale_frames", type=int, default=8,
                     help="Bidirectional scale frames processed together in phase 1 "
-                         "(demo.py default 8). The README's 'Running on Limited GPU "
+                         "(demo.py default 8). The upstream README's (Robbyant/lingbot-map) 'Running on Limited GPU "
                          "Memory' section recommends 2 to shrink that phase's "
                          "activation peak -- needed for 518x518 (portrait-sourced) "
                          "frames on an 8GB card, which OOM at the default 8.")
@@ -64,7 +64,22 @@ def main():
                          "(demo.py's own flag, default off). The SDPA streaming "
                          "path clones the KV cache on every attention call; "
                          "FlashInfer's paged KV cache is the memory-efficient path "
-                         "the README recommends for streaming on GPU.")
+                         "the upstream README recommends for streaming on GPU.")
+    p.add_argument("--rotate_clockwise_90", action="store_true",
+                    help="demo.py's own option: rotate frames before preprocessing. A "
+                         "portrait video becomes landscape, so the 518-wide crop keeps "
+                         "the whole field of view (518x294 = 777 tokens instead of a "
+                         "518x518 centre crop = 1369 tokens).")
+    p.add_argument("--camera_num_iterations", type=int, default=1,
+                    help="Camera head refinement iterations (demo.py default 4; the "
+                         "research runs used 1 for speed).")
+    p.add_argument("--manifest", type=str, default=None,
+                    help="manifest.json from scripts_context/curate_and_synthesize.py. "
+                         "Synthetic frames are fed to the model (temporal context for "
+                         "pose) but removed before building the map.")
+    p.add_argument("--save_predictions", type=str, default=None,
+                    help="Save poses, depth, confidence and images (half resolution) "
+                         "to this .npz for scripts_context/evaluate_consistency.py.")
     p.add_argument("--no_serve", action="store_true",
                     help="Skip viewer.run() at the end (which never returns by "
                          "design, keeping the process alive to serve the viser "
@@ -82,14 +97,16 @@ def main():
     images, paths, resolved_image_folder = demo.load_images(
         image_folder=args.image_folder, first_k=args.first_k,
         image_size=518, patch_size=14,
+        rotate_clockwise_90=args.rotate_clockwise_90,
     )
-    print(f"Loaded {images.shape[0]} images in {time.time()-t0:.1f}s", flush=True)
+    print(f"Loaded {images.shape[0]} images in {time.time()-t0:.1f}s "
+          f"({images.shape[-1]}x{images.shape[-2]})", flush=True)
 
     model_args = argparse.Namespace(
         model_path=args.model_path, image_size=518, patch_size=14,
         mode="streaming", enable_3d_rope=True, max_frame_num=1024,
         num_scale_frames=args.num_scale_frames, kv_cache_sliding_window=args.kv_cache_sliding_window,
-        camera_num_iterations=1, use_sdpa=args.use_sdpa, compile=False,
+        camera_num_iterations=args.camera_num_iterations, use_sdpa=args.use_sdpa, compile=False,
     )
     t0 = time.time()
     model = demo.load_model(model_args, device)
@@ -137,6 +154,41 @@ def main():
 
     predictions, images_cpu = demo.postprocess(predictions, images_for_post)
     vis_dict = demo.prepare_for_visualization(predictions, images_cpu)
+
+    import numpy as np
+    is_real = np.ones(num_frames, dtype=bool)
+    source_index = np.arange(num_frames)
+    if args.manifest:
+        import json
+        with open(args.manifest) as f:
+            entries = json.load(f)["frames"]
+        names = [os.path.basename(pth) for pth in paths]
+        if names != [e["file"] for e in entries]:
+            raise SystemExit("el manifest no coincide con los frames cargados")
+        is_real = np.array([e["kind"] == "real" for e in entries])
+        source_index = np.array([e.get("source_index", -1) for e in entries])
+
+    if args.save_predictions:
+        ds = 2
+        np.savez(
+            args.save_predictions,
+            depth=vis_dict["depth"][:, ::ds, ::ds, 0].astype(np.float16),
+            depth_conf=vis_dict["depth_conf"][:, ::ds, ::ds].astype(np.float16),
+            images=(vis_dict["images"][:, :, ::ds, ::ds].transpose(0, 2, 3, 1) * 255).astype(np.uint8),
+            extrinsic=vis_dict["extrinsic"].astype(np.float32),
+            intrinsic=vis_dict["intrinsic"].astype(np.float32),
+            ds=ds, is_real=is_real, source_index=source_index,
+        )
+        print(f"Predictions saved to {args.save_predictions}", flush=True)
+
+    if not is_real.all():
+        # Synthetic frames only served as temporal context: keep their invented
+        # geometry out of the map (and out of the camera frustums shown).
+        for k, v in list(vis_dict.items()):
+            if isinstance(v, np.ndarray) and v.ndim >= 1 and v.shape[0] == num_frames:
+                vis_dict[k] = v[is_real]
+        print(f"Map built from {int(is_real.sum())} real frames "
+              f"({int((~is_real).sum())} synthetic frames used only as context)", flush=True)
 
     from lingbot_map.vis import PointCloudViewer
     viewer = PointCloudViewer(
@@ -199,7 +251,8 @@ def main():
             ax.set_aspect("equal")
             ax.invert_yaxis()
             ax.set_axis_off()
-        fig.suptitle(f"LingBot-Map reconstruction -- {num_frames} real webcam frames")
+        fig.suptitle(f"LingBot-Map reconstruction -- {int(is_real.sum())} real frames"
+                     + (f" (+{int((~is_real).sum())} synthetic as context)" if not is_real.all() else ""))
         fig.tight_layout()
         fig.savefig(args.preview_png, dpi=150)
         plt.close(fig)

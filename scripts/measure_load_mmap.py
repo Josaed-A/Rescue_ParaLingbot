@@ -1,5 +1,5 @@
 """Test torch.load(..., mmap=True) as a peak-reducing loading strategy for
-demo.py::load_model(). See CLAUDE.md, "Experimento: torch.load(mmap=True)",
+demo.py::load_model(). See README.md, "Experimento: torch.load(mmap=True)",
 for compatibility checks (torch 2.13.0 has the mmap param; the checkpoint is
 zip-based, a lightweight mmap=True probe completed in 0.6s vs ~70-90s
 without it) and this experiment's rationale.

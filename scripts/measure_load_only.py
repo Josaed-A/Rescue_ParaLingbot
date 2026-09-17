@@ -10,7 +10,7 @@ Uses the Windows API directly (GetProcessMemoryInfo / GlobalMemoryStatusEx)
 instead of external polling: PeakWorkingSetSize / PeakPagefileUsage are
 peaks tracked continuously by the OS, so short spikes between samples can't
 be missed the way they could with the 3s-interval external monitor used for
-the full-pipeline run (see CLAUDE.md "Reporte: medición de pico de RAM").
+the full-pipeline run (see README.md "Reporte: medición de pico de RAM").
 Does not modify demo.py or any lingbot_map code.
 """
 import argparse

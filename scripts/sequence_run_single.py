@@ -1,7 +1,7 @@
 """Single run of the long-sequence memory-stability campaign — one fresh
 process, one frame count, matching EXACTLY the current baseline
 (FP32 + mmap=True + del/gc.collect(), demo.py unmodified, no new
-optimizations). See CLAUDE.md, "Campaña de secuencia larga", for the
+optimizations). See README.md, "Campaña de secuencia larga", for the
 campaign design and results.
 
 Calls demo.load_model() and demo.load_images() UNCHANGED (real production

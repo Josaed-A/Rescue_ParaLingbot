@@ -1,6 +1,6 @@
 # Samples process working-set + system-wide free RAM at a fixed interval while a
 # target PID is alive. Used to capture RAM peaks during demo.py / benchmark runs on
-# this RAM-constrained machine (see CLAUDE.md — "Restricción de hardware crítica").
+# this RAM-constrained machine (see README.md — "Restricción de hardware crítica").
 param(
     [Parameter(Mandatory = $true)][int]$ProcessId,
     [string]$OutCsv = "ram_report.csv",

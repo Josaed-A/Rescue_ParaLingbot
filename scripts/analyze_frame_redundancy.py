@@ -2,7 +2,7 @@
 
 Pure image analysis — does NOT load LingBot-Map / GCTStream, does NOT run
 any model inference, does NOT touch demo.py. Conceptual groundwork for the
-"Lightweight Context Analyzer" idea in CLAUDE.md (frame selection based on
+"Lightweight Context Analyzer" idea in README.md (frame selection based on
 motion/change, Paragraphica-inspired context-aware computation) — this
 script only measures how much consecutive frames actually differ, as an
 experimental estimate, not a change-detector implementation.

@@ -5,7 +5,7 @@ demo.py / run_single.py / run_gpu_baseline.py can consume directly via
 This is deliberately the simplest possible bridge from "live camera" to "the
 pipeline we already trust": rather than reimplementing inference_streaming's
 two phases against a live cv2.VideoCapture loop (analyzed but not built yet,
-see CLAUDE.md "Analisis de interfaz para webcam RGB en vivo"), it captures a
+see README.md "Analisis de interfaz para webcam RGB en vivo"), it captures a
 real trajectory first (record), then hands the resulting folder to the exact
 same demo.py / run_single.py entrypoints already used and validated for
 example/courthouse and example/university. Does not touch demo.py or
