@@ -38,6 +38,27 @@ from torchvision.models.optical_flow import Raft_Large_Weights, raft_large
 # Selection
 # ----------------------------------------------------------------------------
 
+def select_frames_uniform_time(sharp, stride, blur_rel, window, search):
+    """Uniform spacing in TIME (like ffmpeg -vf fps=N), picking the sharpest frame
+    near each slot. LingBot-Map's 3D RoPE indexes frames by position, so uneven
+    time steps distort its temporal prior; this keeps the cadence intact and only
+    swaps each slot for a sharper neighbour."""
+    sharp = np.asarray(sharp)
+    ref = percentile_filter(sharp, 75, size=window, mode="nearest")
+    rel = sharp / np.maximum(ref, 1e-6)
+    n = len(sharp)
+    kept, last = [], -1
+    for target in range(0, n, stride):
+        lo, hi = max(target - search, last + 1), min(target + search + 1, n)
+        if lo >= hi:
+            continue
+        cand = [j for j in range(lo, hi) if rel[j] >= blur_rel] or list(range(lo, hi))
+        j = max(cand, key=lambda k: rel[k] - 0.5 * abs(k - target) / max(search, 1))
+        kept.append(j)
+        last = j
+    return kept, rel
+
+
 def select_frames(sharp, motion, step, blur_rel, window, max_stretch=2.0):
     """Return kept candidate indices and, per kept frame, the gap (px) to the previous one."""
     sharp = np.asarray(sharp)
@@ -90,9 +111,14 @@ def backwarp(img, flow):
 
 
 class Interpolator:
-    def __init__(self, device, flow_updates=20):
+    def __init__(self, device, flow_updates=20, flow_max_side=960):
         self.device = device
         self.flow_updates = flow_updates
+        # RAFT's correlation volume grows with (H/8 * W/8)^2: at 1080x1920 it asks
+        # for ~3.9 GiB and does not fit in this 8 GB GPU. The flow is computed on a
+        # downscaled copy and then upscaled to warp the full-resolution frames.
+        # 960 keeps the previously documented runs (540x960 candidates) unchanged.
+        self.flow_max_side = flow_max_side
         self.model = raft_large(weights=Raft_Large_Weights.DEFAULT).to(device).eval()
 
     def _prep(self, bgr):
@@ -103,11 +129,27 @@ class Interpolator:
     def __call__(self, bgr0, bgr1, ts):
         i0, i1 = self._prep(bgr0), self._prep(bgr1)
         H, W = i0.shape[-2:]
-        ph, pw = (-H) % 8, (-W) % 8
+        if self.flow_max_side and max(H, W) > self.flow_max_side:
+            sc = self.flow_max_side / max(H, W)
+            h2, w2 = int(round(H * sc)), int(round(W * sc))
+            a_src = F.interpolate(i0, size=(h2, w2), mode="bilinear", align_corners=False)
+            b_src = F.interpolate(i1, size=(h2, w2), mode="bilinear", align_corners=False)
+        else:
+            h2, w2, a_src, b_src = H, W, i0, i1
+        ph, pw = (-h2) % 8, (-w2) % 8
         pad = lambda t: F.pad(t, (0, pw, 0, ph), mode="replicate")
-        a, b = pad(i0) * 2 - 1, pad(i1) * 2 - 1
-        f01 = self.model(a, b, num_flow_updates=self.flow_updates)[-1][..., :H, :W]
-        f10 = self.model(b, a, num_flow_updates=self.flow_updates)[-1][..., :H, :W]
+        a, b = pad(a_src) * 2 - 1, pad(b_src) * 2 - 1
+        f01 = self.model(a, b, num_flow_updates=self.flow_updates)[-1][..., :h2, :w2]
+        f10 = self.model(b, a, num_flow_updates=self.flow_updates)[-1][..., :h2, :w2]
+        if (h2, w2) != (H, W):
+            def _up(f):
+                f = F.interpolate(f, size=(H, W), mode="bilinear", align_corners=False)
+                f[:, 0] *= W / w2
+                f[:, 1] *= H / h2
+                return f
+            f01, f10 = _up(f01), _up(f10)
+            del a, b, a_src, b_src
+            torch.cuda.empty_cache() if i0.is_cuda else None
         # forward-backward inconsistency marks pixels occluded in the other frame
         e0 = (f01 + backwarp(f10, f01)[0]).norm(dim=1, keepdim=True)
         e1 = (f10 + backwarp(f01, f10)[0]).norm(dim=1, keepdim=True)
@@ -147,14 +189,39 @@ def main():
     p.add_argument("--max_synth_gap", type=float, default=240.0,
                    help="saltos mayores (px) no se sintetizan: la interpolación se desarma")
     p.add_argument("--no_synth", action="store_true", help="solo curar (variante de control)")
+    p.add_argument("--flow_max_side", type=int, default=960,
+                   help="lado máximo (px) al que se calcula el flujo RAFT; los frames se "
+                        "interpolan a resolución completa igual. Bajarlo si falta VRAM")
+    p.add_argument("--frames_dir", default=None,
+                   help="tomar los frames de esta carpeta en vez de la del análisis "
+                        "(mismos nombres e índices, p. ej. una extracción a resolución completa)")
+    p.add_argument("--spacing", choices=["motion", "time"], default="motion",
+                   help="motion: un frame cada step_px de movimiento. "
+                        "time: cadencia uniforme (cada stride frames del video), "
+                        "eligiendo el más nítido cerca de cada posición")
+    p.add_argument("--stride", type=int, default=3,
+                   help="spacing=time: cada cuántos frames del video (3 ≈ 10 fps en un video de 30 fps)")
+    p.add_argument("--search", type=int, default=1,
+                   help="spacing=time: cuántos frames alrededor de la posición ideal se miran "
+                        "para elegir el más nítido (0 = cadencia exacta, sin selección)")
     args = p.parse_args()
 
     with open(args.analysis) as f:
         an = json.load(f)
-    src_dir = an["frames_dir"]
+    # The analysis can be computed on downscaled copies (faster RAFT) while the
+    # frames that reach the model come from a higher-resolution extraction of the
+    # same video: same file names, same order, same indices.
+    src_dir = args.frames_dir or an["frames_dir"]
     files = an["files"]
-    kept, gaps, rel = select_frames(an["sharpness"], an["pairs"]["motion_med"],
-                                    args.step_px, args.blur_rel, args.window)
+    motion = an["pairs"]["motion_med"]
+    if args.spacing == "time":
+        kept, rel = select_frames_uniform_time(an["sharpness"], args.stride, args.blur_rel,
+                                               args.window, args.search)
+        cum = np.concatenate([[0.0], np.cumsum(motion)])
+        gaps = [0.0] + [float(cum[b] - cum[a]) for a, b in zip(kept[:-1], kept[1:])]
+    else:
+        kept, gaps, rel = select_frames(an["sharpness"], motion,
+                                        args.step_px, args.blur_rel, args.window)
 
     frames_dir = os.path.join(args.out_dir, "frames")
     if os.path.isdir(frames_dir):
@@ -162,7 +229,7 @@ def main():
     os.makedirs(frames_dir)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    interp = None if args.no_synth else Interpolator(device)
+    interp = None if args.no_synth else Interpolator(device, flow_max_side=args.flow_max_side)
 
     manifest = []
     examples = []
@@ -199,7 +266,10 @@ def main():
         "kept_real": len(kept),
         "synthetic": n_synth,
         "total": len(manifest),
-        "step_px": args.step_px,
+        "spacing": args.spacing,
+        "step_px": args.step_px if args.spacing == "motion" else None,
+        "stride": args.stride if args.spacing == "time" else None,
+        "search": args.search if args.spacing == "time" else None,
         "blur_rel": args.blur_rel,
         "synth_factor": args.synth_factor,
         "gap_px_median": float(np.median(real_gaps)),

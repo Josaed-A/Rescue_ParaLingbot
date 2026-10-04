@@ -1,54 +1,44 @@
-# GARDIAN · LingBot-Map adaptativo con amortiguador visual (context-to-image)
+# GARDIAN · LingBot-Map para video de mano de baja calidad
 
 Mapeo 3D con una cámara RGB común para un robot de búsqueda y rescate (proyecto **GARDIAN**: Ground-Aerial Response for Disaster Intelligence and Assistance Network), construido sobre [LingBot-Map](https://github.com/Robbyant/lingbot-map).
 
-Este repositorio agrega una capa que decide **qué** ver antes de reconstruir, inspirada en [Paragraphica](https://github.com/bjoernkarmann/Paragraphica). Con video de baja calidad (cámara movida, giros rápidos, grabación vertical), la coherencia geométrica del mapa entre vistas separadas 1 segundo sube de **47% a 75%**.
+Este repositorio investiga cómo sacarle un mapa utilizable a un video grabado caminando con un teléfono, en una GPU de 8 GB. Con dos recorridos reales de interior, comparados contra croquis dibujados a mano de la ruta que se caminó, el recorrido reconstruido pasa de medir **2.6 veces** su largo real a **1.13 veces**, y el error de forma baja de **6.44% a 4.75%** del largo de la ruta.
 
 - Instalación en un equipo nuevo: [SETUP.md](SETUP.md).
 - Registro completo de experimentos, mediciones y decisiones: [Bitácora técnica](#bitácora-técnica-de-la-investigación), más abajo en este mismo archivo.
+- La matemática de todo el proyecto (el modelo, la reconstrucción, los filtros y las métricas, y para qué se usa cada uno): [MATEMATICA.md](MATEMATICA.md).
 
-## La idea: contexto antes que píxeles
+## Lo que hay que saber antes de usarlo
 
-Paragraphica es una "cámara" que no captura luz: compone una imagen a partir del contexto del lugar (ubicación, hora, clima). De ese proyecto se toma solo la filosofía, no la técnica: **no procesar toda la información visual por igual, sino construir primero un contexto compacto y usarlo para decidir qué recibe el modelo**.
+**1. Usar `--mode windowed`.** Es lo único que arregla la deriva acumulada. El modo streaming por defecto, en estos videos, enrolla el recorrido sobre sí mismo: recorre 2.6-3.6 veces el largo real. Windowed procesa ventanas solapadas con atención bidireccional y lo deja en ~1.1 veces. **Si el recorrido sube o baja escaleras, usar `--window_size 24`:** con 16, en la primera prueba con desnivel la bajada final quedó registrada como subida ([2026-10-01](#primera-prueba-con-desnivel-escaleras-la-ventana-de-16-pierde-la-bajada-la-de-24-no-2026-10-01)).
 
-Aplicado a la reconstrucción 3D, eso es un **amortiguador visual** entre la cámara y LingBot-Map:
+**2. Cuidado con medir solo la coherencia entre frames vecinos.** Es la trampa en la que cayó este proyecto: una capa de curación de frames ([amortiguador visual](#amortiguador-visual-context-to-image-para-video-de-baja-calidad--pruebas_realesunisabanaprueba_2-2026-09-17), inspirada en [Paragraphica](https://github.com/bjoernkarmann/Paragraphica)) subió la autoconsistencia a 1 s de 47% a 75%, y **empeoró** la forma del recorrido (de 6.44% a 11.92% de error). Un mapa puede encajar consigo mismo localmente y estar torcido de punta a punta. Ver la sección del [2026-09-19](#rutas-reales-dibujadas-a-mano--modo-windowed-la-curación-mejoraba-la-métrica-local-y-empeoraba-el-recorrido-2026-09-19).
 
-```mermaid
-flowchart LR
-  V["Video RGB<br/>todos los frames"] --> A["Analizador de contexto<br/>nitidez + movimiento"]
-  A --> S["Presupuesto adaptativo<br/>qué frames reales entran"]
-  S --> G["Síntesis de contexto<br/>frames intermedios generados"]
-  S --> M["LingBot-Map<br/>pose + profundidad"]
-  G -. "solo contexto temporal" .-> M
-  M --> F["Mapa 3D<br/>solo frames reales"]
-```
+**3. La nube no es rala, está sin fusionar.** El modelo predice profundidad **por píxel** (268 k puntos por frame), no una grilla de puntos de interés. Lo que falta es fusionar el solape entre frames: `scripts_context/export_dense_cloud.py` pasa de 114.6 M de puntos crudos a 10.3 M únicos.
 
-1. **Analizador de contexto** (`scripts_context/analyze_frames.py`). Mide en cada frame del video cuán nítido está (varianza del Laplaciano) y cuánto se movió la imagen respecto del anterior (flujo óptico RAFT). Recorre los ~2000 frames de un minuto de video en aproximadamente un minuto.
-2. **Presupuesto adaptativo** (`scripts_context/curate_and_synthesize.py`). En vez de tomar un frame cada N milisegundos, conserva uno cada ~36 px de movimiento real y, dentro de cada tramo, el más nítido. Así se saltan los frames redundantes (cámara quieta) y los movidos (el vaivén de la caminata), sin dejar huecos de más de dos pasos.
-3. **Síntesis de contexto (context-to-image).** Donde dos frames reales siguen demasiado separados (típicamente en un giro rápido), genera frames intermedios a partir de los dos vecinos nítidos, con flujo óptico bidireccional y máscaras de oclusión. Todo corre localmente, sin APIs externas. No se sintetizan saltos mayores a 240 px, porque ahí la interpolación deja de ser creíble.
-4. **Mapa limpio** (`scripts_webcam/process_and_view.py --manifest`). Los frames sintéticos le dan al modelo continuidad temporal para estimar la pose, pero **se excluyen de la nube de puntos**: ninguna geometría inventada llega al mapa.
+**4. Grabar en horizontal.** Un video vertical pierde ~44% de cada imagen en el recorte cuadrado del modelo. Rotarlo a horizontal después **no** sirve: el modelo necesita la gravedad hacia abajo y su confianza cae al mínimo.
 
-## Resultados con `muestra_unisabana`
+## Resultados
 
-Video de 66 s grabado con teléfono en vertical en pasillos de la Universidad de La Sabana: caminata rápida, desenfoque frecuente y piso de baldosas repetidas. Todas las corridas se hicieron en una RTX 2000 Ada de 8 GB con la misma configuración de memoria.
+Dos recorridos de interior en la Universidad de La Sabana, grabados con teléfono en vertical, caminando. No hay ground truth métrico: la referencia son croquis a mano de la ruta, que permiten medir la **forma** del recorrido (dónde gira, cuán recto es, qué proporción de largo), no metros. Todo en una RTX 2000 Ada de 8 GB.
 
-No hay ground truth, así que la calidad se mide como **autoconsistencia**: la profundidad de un frame real se proyecta sobre otro frame real con las poses predichas y se cuenta qué fracción de los puntos coincide dentro del 5%. Las comparaciones usan pares separados por el mismo tiempo de video en todas las variantes.
+| | Muestra 1 (pasillos, caminata rápida) | Muestra 2 (fablab, caminata lenta) |
+|---|---|---|
+| Configuración original (streaming, 10 fps) | 6.44% de error de forma, largo 2.63× | — |
+| **Configuración actual** (windowed, ventana 16) | **4.75%**, largo 1.13× | **2.47%**, largo 1.15× |
+| Rectitud estimada / croquis | 0.588 / 0.781 | 0.773 / 0.876 |
+| Frames / nube fusionada | 657 / 10.3 M puntos | 476 / 13.8 M puntos |
 
-| Versión | Frames que ve el modelo | Coincidencia a 1 s | Error de profundidad a 1 s |
+Además de la nube, se genera el video de recorrido completo con el renderizador del repositorio original (`demo_render/batch_demo.py`), con el video real y la reconstrucción lado a lado.
+
+**Reconstrucción fotorrealista (Gaussian Splatting).** Con las imágenes y poses del modelo se entrena un splat por prueba (`scripts_context/gsplat_train.py`, ~5 min en la misma GPU). Medido sobre 1 de cada 8 frames que **no** se usaron para construir nada:
+
+| | Muestra 1 | Muestra 2 | Prueba 4 (desnivel) |
 |---|---|---|---|
-| Original: 1 de cada 3 frames (10 fps) | 660 | 46.6% | 5.07% |
-| Presupuesto adaptativo, sin síntesis | 773 | 67.3% | 4.49% |
-| Presupuesto adaptativo + síntesis | 773 reales + 162 sintéticos | 68.3% | 4.44% |
-| **Lo anterior + 4 iteraciones de refinamiento de cámara** | 773 reales + 162 sintéticos | **75.0%** | **4.23%** |
+| Malla TSDF: PSNR / SSIM | 13.7 / 0.55 | 12.6 / 0.45 | 11.6 / 0.43 |
+| **Gaussian Splatting: PSNR / SSIM** | **19.6 / 0.71** | **18.4 / 0.66** | **18.5 / 0.65** |
 
-- **La mayor parte de la mejora viene del presupuesto adaptativo.** La síntesis suma poco con esta muestra (su efecto está dentro del ruido); su valor esperado se concentra en los giros rápidos.
-- **El espaciado de 36 px fue el mejor de los probados:** con 28 px la coincidencia a 1 s baja a 63.0% y con 48 px a 51.3%.
-- **Lo que no funcionó:**
-  - Rotar el video vertical a horizontal para conservar todo el campo visual: el modelo necesita la gravedad hacia abajo y su confianza cae al mínimo.
-  - Ampliar el contexto temporal (4 frames de escala, ventana 20): no cabe en 8 GB a 518x518.
-- **Caveats:** una corrida por variante, sin repeticiones.
-
-El detalle de cada variante está en la bitácora: [Amortiguador visual (context-to-image)](#amortiguador-visual-context-to-image-para-video-de-baja-calidad--pruebas_realesunisabanaprueba_2-2026-09-17).
+En imagen el splat gana por 6-7 dB. En geometría no hay un ganador estable entre los dos (detalle en la bitácora del 2026-10-03).
 
 ## Uso
 
@@ -62,54 +52,95 @@ Mapear un sitio nuevo a partir de un video, siguiendo la convención `captures/p
 
 ```bash
 P=captures/pruebas_reales/<sitio>/prueba_1
-mkdir -p $P/source $P/candidates $P/exports
+mkdir -p $P/source $P/candidates $P/candidates_full $P/exports $P/eval
 cp /ruta/al/video.mp4 $P/source/
 
-# 1. Todos los frames del video, no una extracción a 10 fps (540:960 para video vertical)
-ffmpeg -i $P/source/video.mp4 -vf scale=540:960 -start_number 0 $P/candidates/%06d.png
+# 1. Todos los frames del video: a tamaño completo para el modelo, reducidos para el análisis
+ffmpeg -i $P/source/video.mp4 -start_number 0 $P/candidates_full/%06d.png
+ffmpeg -i $P/source/video.mp4 -vf scale=540:-2 -start_number 0 $P/candidates/%06d.png
 
-# 2. Analizador de contexto
+# 2. Analizador de contexto: nitidez y movimiento de cada frame
 python scripts_context/analyze_frames.py --frames_dir $P/candidates --out $P/analysis.json
 
-# 3. Presupuesto adaptativo + síntesis -> $P/frames y $P/manifest.json
-python scripts_context/curate_and_synthesize.py --analysis $P/analysis.json --out_dir $P
+# 3. Cadencia uniforme (~10 fps), quedándose con el frame más nítido de cada tramo
+python scripts_context/curate_and_synthesize.py --analysis $P/analysis.json \
+    --frames_dir $P/candidates_full --out_dir $P --spacing time --stride 3 --no_synth
 
-# 4. Mapa: los sintéticos entran como contexto y quedan fuera de la nube de puntos
+# 4. Mapa, en modo windowed
 scripts_gpu/run_gpu.sh -- python scripts_webcam/process_and_view.py \
-    --image_folder $P/frames --manifest $P/manifest.json \
-    --model_path checkpoints/lingbot-map.pt \
+    --image_folder $P/frames --model_path checkpoints/lingbot-map.pt \
+    --mode windowed --window_size 16 \
     --use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 --camera_num_iterations 4 \
     --offload_to_cpu --keep_images_on_cpu \
-    --glb_out $P/exports/mapa.glb --preview_png $P/exports/mapa_preview.png --port 8080
+    --save_predictions $P/eval/mapa.npz --save_ds 1 --no_serve
+
+# 5. Todos los mapas de la prueba: nube, alta densidad, cruda + trayectoria, malla TSDF,
+#    Gaussian Splatting y video del recorrido (cada uno en su carpeta de exports/)
+python scripts_context/build_maps.py $P --npz eval/mapa.npz --tasks nube,alta,cruda,malla,splat,video
+
+# 5b. Opcional: filtro geométrico (semántica, consistencia multivista, paredes y piso por planos)
+#     -> malla estructural simple, y malla y splat filtrados (sin personas, paredes planas)
+python scripts_context/build_maps.py $P --npz eval/mapa.npz --tasks filtro,malla_f,splat_f
+
+# 6. Visor: explorador de pruebas, órbita o primera persona
+scripts_context/webgl_viewer/launch.py          # http://localhost:8090
 ```
 
-El visor queda en `http://localhost:8080` y el mapa también se exporta como `.glb`. Opciones útiles:
+Los pasos 5 y 6 también se hacen desde el visor: cada prueba tiene **⚙ construir mapas**,
+que corre `build_maps.py` en segundo plano.
+
+El mismo servidor hace **mapeo en vivo**: en el panel "Mapeo en vivo" se elige la fuente
+(carpeta de frames, webcam o video) y el mapa se construye frame a frame en la pantalla,
+navegable mientras crece. El modelo se carga sólo al iniciar la sesión. **Al terminar, la
+sesión queda guardada** como prueba "sin guardar" (mismo formato que el resto): se le pone
+nombre, zona y categorías, y se le construyen los mapas, incluido el reproceso en
+`windowed` que corrige la deriva del streaming.
+Detalle y límites en [scripts_stream/README.md](scripts_stream/README.md).
+
+El visor queda en `http://localhost:8090`, con un **explorador de pruebas** (agrupar por
+zona, categoría, carpeta o fecha; editar título, zona, categorías y notas; ver los archivos
+de cada prueba; un botón por cada mapa: nube, alta densidad, cruda, malla TSDF y Gaussian
+Splatting) y dos modos de navegación: **órbita** (arrastrar, rueda, clic derecho — lo mismo que hacía el visor
+anterior) y **primera persona** (`WASD` + mouse capturado, `Espacio`/`Ctrl` para subir y
+bajar, `Shift` para correr), que además funciona con un **control de Xbox** (stick
+izquierdo mueve, stick derecho mira, `RT`/`LT` suben y bajan, `Start` alterna modos).
+Detalle en [scripts_context/webgl_viewer/README.md](scripts_context/webgl_viewer/README.md).
+El visor viejo (`view_cloud.py` / `view_npz.py`, un proceso por archivo) sigue funcionando.
+
+Opciones útiles:
 
 | Opción | Dónde | Para qué |
 |---|---|---|
-| `--step_px` (36) | `curate_and_synthesize.py` | Movimiento acumulado entre frames conservados |
-| `--blur_rel` (0.5) | `curate_and_synthesize.py` | Nitidez mínima, relativa al p75 local |
-| `--synth_factor` (1.5), `--max_synth_gap` (240) | `curate_and_synthesize.py` | Cuándo sintetizar y hasta qué salto |
-| `--no_synth` | `curate_and_synthesize.py` | Solo curar, sin frames sintéticos |
-| `--save_predictions run.npz` | `process_and_view.py` | Guardar poses y profundidad para evaluar |
+| `--window_size` (16) | `process_and_view.py` | Keyframes por ventana. En plano, entre 12 y 24 cambia poco; con escaleras usar 24 |
+| `--save_ds` (10) | `process_and_view.py` | 1 = predicciones a resolución completa (necesario para la nube densa) |
+| `--spacing time --stride N` | `curate_and_synthesize.py` | Cadencia uniforme, tomando el frame más nítido cerca de cada instante |
+| `--voxel_rel`, `--conf_percentile` | `export_dense_cloud.py` | Resolución de la fusión y cuánta confianza exigir |
 | `--no_serve` | `process_and_view.py` | No dejar el visor abierto |
 
-Para comparar corridas y volver a abrir un mapa sin usar la GPU:
+Comparar contra un croquis de la ruta real, y generar el video de recorrido completo:
 
 ```bash
-python scripts_context/evaluate_consistency.py antes=a.npz despues=b.npz --out report.json
-python scripts_context/view_npz.py b.npz --port 8080
+python scripts_context/compare_route.py --npz $P/eval/mapa.npz --sketch ruta.jpeg \
+    --out_json $P/eval/ruta.json --out_png $P/eval/ruta.png
+python scripts_context/npz_for_render.py $P/eval/mapa.npz --out $P/exports/render_in.npz
+scripts_gpu/run_gpu.sh -- python scripts_context/render_route.py \
+    --load_predictions $P/exports/render_in.npz --output_folder $P/exports --downsample_factor 5
 ```
 
-Los flags de memoria de arriba son los validados para 8 GB de VRAM; `tools/doctor.py` indica cuáles usar según la GPU. Sin GPU, anteponer `CUDA_VISIBLE_DEVICES=""` al paso 4 (bastante más lento) y quitar `run_gpu.sh`.
+Los flags de memoria son los validados para 8 GB de VRAM; `tools/doctor.py` indica cuáles usar según la GPU. Sin GPU, anteponer `CUDA_VISIBLE_DEVICES=""` y quitar `run_gpu.sh` (bastante más lento).
 
 ## Estructura del repositorio
 
 | Ruta | Contenido |
 |---|---|
 | `lingbot_map/`, `demo.py` | Modelo y demo de LingBot-Map (upstream, con arreglos puntuales de carga y compatibilidad) |
-| `scripts_context/` | **Amortiguador visual:** analizador, curación y síntesis, evaluación, visor desde `.npz`, cadena de variantes |
-| `scripts_webcam/` | Captura con webcam y `process_and_view.py` (mapeo + export `.glb`) |
+| `scripts_context/` | Analizador y curación de frames, comparación contra la ruta real, nube densa, visores, renderizador de recorrido |
+| `scripts_context/webgl_viewer/` | Visor local: explorador de pruebas, splats, primera persona, control Xbox, panel de mapeo en vivo |
+| `scripts_context/build_maps.py`, `tsdf_mesh.py`, `gsplat_train.py` | Construcción de mapas por prueba: nubes, malla TSDF, Gaussian Splatting, video |
+| `scripts_context/geo_filter.py` | Filtro geométrico previo a la malla y al splat: SegFormer, consistencia multivista, planos, esquinas, malla estructural |
+| `scripts_stream/` | Servidor único del visor + mapeo en vivo por WebSocket + guardado de sesiones y trabajos de construcción |
+| `scripts_stream/context_gate.py` | Analizador de contexto (movimiento, nitidez, frames intermedios) para el vivo y para videos |
+| `scripts_webcam/` | Captura con webcam y `process_and_view.py` (mapeo, streaming o windowed, export `.glb` y `.npz`) |
 | `scripts_gpu/` | Chequeo previo de GPU, lanzador que bloquea la suspensión, arreglo de suspensión del driver, baseline de VRAM |
 | `scripts_seq/`, `scripts/` | Instrumentación de las campañas de memoria y tiempo (Linux y Windows) |
 | `env/`, `setup_env.sh`, `tools/` | Instalación reproducible: versiones fijas, perfiles, descarga verificada de modelos, diagnóstico |
@@ -118,10 +149,13 @@ Los flags de memoria de arriba son los validados para 8 GB de VRAM; `tools/docto
 
 ## Limitaciones
 
-- La métrica mide coherencia interna, no exactitud métrica, y la escala de la profundidad monocular es ambigua.
-- La configuración de 8 GB limita el contexto temporal (ventana de 16 keyframes) y el video vertical pierde ~44% de cada imagen en el recorte cuadrado del modelo. La recomendación sigue siendo grabar en horizontal, despacio y a la altura de los ojos.
-- Los frames sintéticos muestran artefactos en texturas repetitivas (baldosas). No afectan el mapa porque quedan fuera de la nube de puntos, pero limitan cuánto ayudan a la pose.
-- No se usaron APIs de generación de imagen (no hay claves configuradas) ni refinamiento con modelos de difusión. Ambos quedan como líneas futuras, con el riesgo de que la generación invente estructura que desvíe la pose.
+- **Los croquis no son ground truth métrico:** miden la forma del recorrido, no metros, y la escala de la profundidad monocular es ambigua.
+- **Dos muestras, dos croquis, una corrida por variante.** La inferencia es determinista, pero eso no convierte dos recorridos en evidencia general.
+- La configuración de 8 GB limita el contexto temporal (ventana de 16 keyframes) y el video vertical pierde ~44% de cada imagen en el recorte cuadrado del modelo.
+- El analizador de contexto (elegir frames por movimiento y nitidez, con frames intermedios opcionales) mejora los recorridos lentos y empeora los rápidos ([2026-10-04](#filtro-geométrico-previo-a-la-malla-y-al-splat-malla-estructural-analizador-de-contexto-en-vivo-y-la-matemática-del-proyecto-2026-10-04)). Está activado en vivo y es opcional en videos; la configuración recomendada para videos sigue siendo la cadencia uniforme.
+- El filtro geométrico necesita revisitas y paredes planas: en pasillos largos con deriva residual la estructura queda incompleta.
+- No se usaron APIs de generación de imagen (no hay claves configuradas) ni refinamiento con modelos de difusión.
+- **Memoria:** los trabajos pesados (mapas, splats, mapeo en vivo) pueden pedir 8-11 GB de RAM. Lanzados desde una terminal de VS Code, si agotan la memoria systemd-oomd cierra VS Code entero; por eso `run_gpu.sh`, el visor y "construir mapas" los corren aislados con `scripts_gpu/run_isolated.sh`. El swap de esta máquina es de 2 GB.
 
 ## Créditos
 
@@ -174,6 +208,30 @@ RGB camera → LingBot-Map → depth + pose estimados → point cloud, tratando 
 **Actualización 2026-09-14 (más reciente) — primera secuencia larga de un sitio real procesada completa en GPU:** `captures/pruebas_reales/unisabana/prueba_1` (660 frames de un recorrido grabado con teléfono) corre entero en la GPU de 8GB en **389s (0.59 s/frame), VRAM pico 7482 MiB, 13.9M puntos**, con visor local verificado. FlashInfer quedó descartado con números (pool preasignado de 12.91 GiB); lo que lo hizo caber fue `--kv_cache_sliding_window 16` + `--num_scale_frames 2` + `--offload_to_cpu` + imágenes en CPU. Calidad limitada principalmente por el **formato portrait del video (el crop descarta ~44% de cada imagen)**, además de desenfoque y parámetros reducidos — recomendación: regrabar en landscape. Ver secciones "Nueva categoría: pruebas reales", "Prueba long-sequence `pruebas_reales/unisabana` en GPU" y "Post-reinicio: FlashInfer descartado..." más abajo.
 
 **Actualización 2026-09-17 (más reciente) — amortiguador visual (filosofía Paragraphica, context-to-image):** presupuesto adaptativo de frames por movimiento y nitidez + frames sintéticos por flujo óptico usados solo como contexto temporal; con 4 iteraciones de cámara, la coherencia a 1 s de `unisabana` pasa de 46.6% a 75.0% y el error de profundidad de 5.07% a 4.23%. Ver la sección "Amortiguador visual (context-to-image)" y su continuación más abajo, y el resumen al inicio de este README.
+
+**Actualización 2026-09-19 (más reciente) — referencia externa de la ruta y modo `windowed`; corrige la lectura de la actualización anterior:** con croquis a mano de los dos recorridos reales como referencia de forma, el **modo `windowed`** (`--mode windowed`, ya existente en `demo.py`) resulta ser lo que arregla la deriva: el largo del recorrido pasa de 2.63× a 1.13× el real y el error de forma de 6.44% a 4.75% (muestra 2, fablab: 2.47%). En la misma comparación, el presupuesto adaptativo de frames del 2026-09-17 **empeora** la forma del recorrido (11.92%) aunque mejore la autoconsistencia a 1 s — esa métrica es ciega a la deriva acumulada, y además satura en 1.000 en modo windowed. También: nube fusionada por vóxel (114.6 M → 10.3 M puntos únicos), Kaolin recompilado con CUDA y primer video de recorrido completo con `demo_render/batch_demo.py`. Ver la sección "Rutas reales dibujadas a mano + modo `windowed`" al final de la bitácora.
+
+**Actualización 2026-09-28 (más reciente) — visor con navegación libre y control Xbox; más síntesis NO ayuda:** interfaz nueva en `scripts_context/webgl_viewer/` (selector de prueba, órbita como antes + primera persona con mouse capturado y WASD, compatible con control de Xbox vía Gamepad API, trayectoria y salto a cualquier cámara del video), verificada en un navegador real con los datos de producción. Nubes fusionadas de **alta densidad** (muestra 1: 10.3 M → 30.0 M puntos; muestra 2: 13.8 M → 46.7 M) y videos de recorrido interpolados a 60 fps. **Resultado negativo importante:** subir la generación de frames intermedios (657 reales + 566 sintéticos) **empeora** la forma del recorrido (4.75% → 5.89% aislando el cambio de `keyframe_interval`, → 7.10% sin aislarlo), así que la configuración recomendada no cambia. Ver la sección "Visor WebGL con navegación en primera persona y control Xbox" al final de la bitácora.
+
+**Actualización 2026-09-30 (más reciente) — mapeo EN VIVO y limpieza:** `scripts_stream/live_server.py` es ahora **el único servidor** del visor: sirve las nubes ya exportadas y además un canal WebSocket que muestra **el mapa construyéndose en tiempo real** (2.1-2.4 frames/s, VRAM 5.4-6.2 GB; fuentes: carpeta de frames, webcam o video). El modelo se carga sólo al iniciar una sesión en vivo y libera la VRAM al terminar. **Aviso importante: en vivo sólo existe el modo streaming, que es el que deriva** — para el mapa bueno hay que reprocesar la grabación después en `windowed`. También: los recuadros de cámara se cambiaron por flechas con el degradado viridis del repo original (antes tapaban el mapa), `prueba_1` se consolidó en `prueba_2` (era el mismo video con el mapa viejo que deriva) y `captures/` pasó de 33 GB a 14 GB. Ver la sección "Mapeo en vivo por WebSocket" al final de la bitácora.
+
+**Actualización 2026-10-01 (más reciente) — primera prueba con cambio de nivel (escaleras), `unisabana/prueba_4`:** con la configuración recomendada (windowed, ventana 16) el modelo ve bien la primera subida, pero convierte la bajada final en otra subida y el recorrido termina "un piso arriba" de donde empezó. Con **ventana 24** sí vuelve a la altura de partida y a la puerta de entrada, como en el video. Streaming también recupera la bajada, pero con la planta en zigzag. Herramienta nueva: `scripts_context/height_profile.py` (perfil de altura sin escala). Ver la sección "Primera prueba con desnivel" al final de la bitácora.
+
+**Actualización 2026-10-01 (más reciente) — primera malla por fusión TSDF:** `scripts_context/tsdf_mesh.py` trata al modelo como un sensor RGB-D virtual y saca una malla con color de la muestra 2 (fablab), visible en el visor. Se reconoce la planta, pero solo el ~35% de los píxeles de cada frame coincide con la malla, con tramos enteros en 0%, por inconsistencia entre frames. Realinear los frames rechazados (ICP con escala) apenas mejora (34% → 36%). Ver la sección "Primera malla por fusión TSDF" al final de la bitácora.
+
+**Actualización 2026-10-03 (más reciente) — Gaussian Splatting, mismos mapas en todas las pruebas, explorador por categorías, sesiones en vivo guardables, y por qué se cerraba VS Code:** `scripts_context/gsplat_train.py` (gsplat) supera a la malla TSDF en imagen sobre frames no vistos en las tres muestras (PSNR 18.4-19.6 contra 11.6-13.7; SSIM 0.65-0.71 contra 0.43-0.55), con guía de profundidad absoluta, sin refinar poses y 7000 iteraciones; en geometría no hay ganador estable. `scripts_context/build_maps.py` deja el mismo juego de mapas (nube, alta, cruda, malla, splat, video) en cada prueba. El visor tiene un explorador con zona, categorías y archivos, dibuja splats, y cada sesión en vivo se guarda como prueba y se puede reprocesar en windowed. **VS Code se cerraba por falta de RAM:** systemd-oomd mataba su cgroup entero (incluidos los trabajos lanzados desde su terminal); ahora los trabajos pesados corren aislados con `scripts_gpu/run_isolated.sh`, y la fusión de nubes usa ~5 veces menos memoria. Ver la sección del 2026-10-03 al final de la bitácora.
+
+**Actualización 2026-10-04 (más reciente): filtro geométrico, malla estructural, analizador de contexto en vivo y `MATEMATICA.md`.**
+
+- **Matemática:** `MATEMATICA.md` reúne la matemática de todo el proyecto (modelo, reconstrucción, filtros, métricas) y para qué se usa cada parte.
+- **Filtro geométrico:** `scripts_context/geo_filter.py` combina segmentación semántica con SegFormer, consistencia multivista, paredes y piso por planos (RANSAC, Manhattan, fusión de paredes dobles, esquinas) y una malla estructural simple. No cambia la nube.
+  - Las "paredes dobles" de estos videos resultaron ser frames enteros corridos, no capas: descartar puntos casi no las afecta.
+  - Realinear frames contra los planos sí las afina (puntos fuera de la lámina de 0.52 a 0.42), pero empeora las vistas nuevas del splat en dos de tres muestras, así que queda opcional.
+  - El filtro sin realineación es neutro o algo positivo para el splat (+0.02 a +0.21 dB), saca a las personas y da la planta esquemática del fablab y los dos niveles de la escalera.
+- **Analizador de contexto en vivo** (`scripts_stream/context_gate.py`): en la caminata lenta mejora el recorrido (en vivo, error de forma de 6.49% a 4.18%; en windowed con síntesis, de 2.47% a 1.86%) y en la rápida lo empeora. En vivo queda activado por defecto; en videos, opcional.
+- **Sesiones largas en vivo:** se encontraron y acotaron dos límites que las rompían, la VRAM que crecía sin límite y la tabla de 1024 posiciones del RoPE 3D.
+
+Ver la sección del 2026-10-04 al final de la bitácora.
 
 **Pendiente de decisión del usuario:** implementar el driver de captura de webcam en vivo (análisis ya hecho, nada implementado todavía), decidir si mitigar el techo de VRAM de la GPU antes de ese experimento (dado que a ~4 FPS el mismo OOM se alcanzaría en ~9 segundos de captura continua), continuar la campaña secuencial en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o recién ahí empezar la integración/optimización con Paragraphica.
 
@@ -1937,6 +1995,844 @@ scripts_gpu/run_gpu.sh -- python3 scripts_webcam/process_and_view.py \
     --glb_out $P/exports/mapa.glb --preview_png $P/exports/mapa_preview.png --port 8080
 ```
 Donde `$P/candidates` son **todos** los frames del video (`ffmpeg -i video.mp4 -vf scale=540:960 -start_number 0 $P/candidates/%06d.png` para un video vertical), no una extracción a 10 fps.
+
+## Rutas reales dibujadas a mano + modo `windowed`: la curación mejoraba la métrica local y empeoraba el recorrido (2026-09-19)
+
+**Pedido del usuario:** archivar un video nuevo y dos croquis de las rutas reales (enviados por WhatsApp), usar los croquis como "pseudo entrenamiento" comparándolos con la trayectoria que sale del render, hacer una prueba nueva con los dos videos, dar visualización local, generar además el video de recorrido completo como lo hace el repositorio original, y densificar la nube de puntos. Sin commits.
+
+**Este es el resultado más importante de la investigación hasta ahora, y corrige una conclusión anterior:** con una referencia externa de la forma del recorrido, el presupuesto adaptativo de frames documentado el 2026-09-17 **empeora** la trayectoria global, aunque mejore la autoconsistencia local. Lo que arregla el recorrido es un mecanismo distinto: el **modo `windowed`**, que ya existía en `demo.py` y nunca se había probado en estas muestras. Las secciones anteriores se conservan sin editar; esta las contradice en un punto concreto y explica por qué.
+
+### Archivos nuevos y organización
+
+Categoría nueva, hermana de `prueba_N/` dentro del sitio (los croquis no son de una prueba, son del recorrido):
+
+```
+captures/pruebas_reales/unisabana/
+  rutas_reales/                            <- NUEVO: croquis a mano de los recorridos
+    ruta_real_muestra_1_unisabana.jpeg     <- ruta de prueba_1 / prueba_2
+    ruta_real_muestra_2_fablab.jpeg        <- ruta de prueba_3
+    comparacion_rutas.png                  <- estimadas superpuestas a los croquis
+    info.json
+  prueba_3/                                <- NUEVO sitio-prueba: fablab
+    source/muestra_2_fablab.mp4
+    candidates/ candidates_full/ frames/ variantes/ eval/ exports/ info.json
+```
+
+`muestra_2_fablab.mp4`: 47.6 s, 1920x1080 con rotación -90 (vertical igual que la muestra 1), 29.83 fps, 1397 frames. El analizador de contexto da **5.8 px/frame de movimiento mediano** contra 13.9 de la muestra 1, y frames bastante más nítidos: es una caminata más lenta y cuidada.
+
+### La métrica nueva: comparar contra un dibujo a mano (`scripts_context/compare_route.py`)
+
+Un croquis no tiene escala ni norte, así que no sirve como ground truth métrico. Sí sirve para medir la **forma** del recorrido, que es justo lo que la autoconsistencia no ve. El script:
+
+1. Extrae la línea amarilla del croquis (máscara HSV), la adelgaza a un píxel de ancho (Zhang-Suen) y recorre el camino más largo del esqueleto.
+2. Proyecta la trayectoria estimada vista desde arriba. El "arriba" no se elige con PCA: se usa el propio eje de las cámaras (`c2w[:, :3, 1]`, que en la convención OpenCV apunta hacia el suelo), promediado sobre los frames reales.
+3. Remuestrea ambas curvas por longitud de arco y las alinea con Umeyama (giro + escala + traslación), probando también espejo e inversión, y se queda con la mejor.
+
+Sale: `error_pct` (distancia media a la ruta, como % del largo), `straightness` (distancia entre extremos / largo recorrido), `length_ratio` (largo estimado / largo del croquis tras alinear) y el giro acumulado.
+
+**Convención de `extrinsic` (ya documentada el 2026-09-17 para el evaluador, vuelve a aparecer aquí):** el visor invierte la matriz que recibe. `demo_render/rgbd_render/data/loader.py` hace lo mismo. El script de rutas invierte igual; usarla directa da trayectorias sin sentido.
+
+### El hallazgo: las dos métricas se contradicen
+
+Muestra 1, misma escena, mismos flags de 8 GB salvo lo indicado:
+
+| Variante | Frames | **Error de forma** | Rectitud | Largo vs real | Giro acum. | Coincidencia a 1 s |
+|---|---|---|---|---|---|---|
+| Croquis (referencia) | — | — | **0.781** | 1.000 | 575° | — |
+| `baseline` = prueba_1 (streaming, 10 fps) | 660 | 6.44% | 0.167 | **2.63×** | 3049° | 46.6% |
+| `v5_iter4` = mejor de la sesión anterior (curado + síntesis + 4 iter) | 773 | **11.92%** | **0.114** | **3.64×** | 3545° | **75.0%** |
+| `b_windowed` (los mismos 660 frames del baseline, modo windowed) | 660 | 5.59% | 0.576 | 1.105 | 861° | 100% |
+| **`final_m1`** (windowed + frames a resolución completa, cadencia uniforme + nitidez) | 657 | **4.75%** | **0.588** | **1.133** | 1337° | 100% |
+
+**La variante que la bitácora del 2026-09-17 daba como la mejor (75.0% de coincidencia a 1 s) es la peor de la tabla en forma del recorrido:** recorre 3.6 veces el largo real y su rectitud (0.114) está aún más lejos del croquis (0.781) que el baseline. No es una contradicción de las mediciones anteriores — son correctas — sino de lo que se concluyó de ellas: **la autoconsistencia mide coherencia entre frames vecinos y es ciega a la deriva acumulada**. Un mapa puede encajar perfectamente consigo mismo localmente y enrollarse sobre sí mismo a lo largo del recorrido.
+
+**Por qué la curación empeora la deriva (hipótesis, no verificada por ablación interna):** el RoPE 3D del modelo indexa los frames por posición en la secuencia, no por tiempo real. Conservar un frame cada ~36 px de movimiento produce pasos de tiempo desiguales: un giro rápido queda comprimido en pocos índices y un tramo quieto se estira. Es consistente con lo observado, pero confirmarlo requeriría tocar `lingbot_map`, que está fuera del alcance de esta línea.
+
+**Aviso sobre la coincidencia a 1 s en modo windowed:** da exactamente 1.000 en todas las corridas windowed. No es "perfecto": dentro de una ventana la atención es bidireccional y los frames comparados salen de la misma ventana, así que la métrica **satura y deja de discriminar**. A partir de aquí, la que ordena las variantes es la de forma del recorrido.
+
+### Modo `windowed`: lo que sí arregla la deriva
+
+`lingbot_map/models/gct_stream_window.py` expone `inference_windowed`, que `demo.py` ofrece con `--mode windowed` y nunca se había usado en estas muestras. En vez de un caché causal que se desliza frame a frame, procesa ventanas solapadas con atención bidireccional dentro de cada una. `window_size` cuenta keyframes: los frames reales por ventana son `scale + (window − scale) × keyframe_interval`.
+
+Se expuso en `scripts_webcam/process_and_view.py` (`--mode`, `--window_size`, `--overlap_keyframes`, `--keyframe_interval`, `--preprocess_mode`, `--save_ds`), sin tocar `demo.py` ni `lingbot_map`. El efecto es grande e inmediato: sobre los mismos 660 frames del baseline, el largo del recorrido pasa de 2.63× a 1.105× y el giro acumulado de 3049° a 861° (croquis: 575°).
+
+### Variantes probadas y descartadas (25 corridas en total sobre la muestra 1)
+
+Todas peores que `final_m1` (4.75%):
+
+| Variante | Cambio | Error de forma |
+|---|---|---|
+| `w3_windowed_w24` | ventana 24 | 7.10% |
+| `x2_win12` | ventana 12 | 6.29% |
+| `x3_win16_ov8` | solape 8 keyframes | 6.20% |
+| `x4_win16_scale4` | 4 frames de escala | 7.29% |
+| `x1_win_mov` | windowed sobre los frames curados por movimiento | 6.56% |
+| `t3_windowed` | ídem, con síntesis | 5.70% |
+| `t2_kf6` | `keyframe_interval 6` | 17.18% |
+| `i0_tiempo_iter1` | 1 iteración de cámara | 13.24% |
+| `f0/f1/f2_full_*` | resolución completa, **streaming** | 13.01-13.54% |
+| `t0/t1_tiempo_*` | cadencia uniforme, **streaming** | 12.92-13.00% |
+| `v3_rotado`, `v4_rotado_ctx` | video rotado a horizontal | 16.80-17.18% |
+
+Lecturas: (1) la resolución de entrada **no** es lo que limitaba — a resolución completa pero en streaming el error sigue en ~13%; (2) la rotación a horizontal vuelve a fallar, como ya se había medido; (3) dentro de windowed, los parámetros importan poco (5.6-7.3%) comparado con el salto de streaming a windowed.
+
+**Determinismo comprobado:** `b_repro` reprodujo el baseline exactamente (6.44% / 0.167 / 2.633). La inferencia no tiene ruido entre corridas, así que las diferencias de 1-2 décimas entre variantes vecinas no son concluyentes: vienen de **qué frames** elige cada extracción (`ffmpeg -vf fps=10` no toma los mismos que un salto de 3), no del modelo.
+
+### Configuración final y resultados de las dos muestras
+
+```bash
+scripts_gpu/run_gpu.sh -- python3 scripts_webcam/process_and_view.py \
+    --image_folder $P/variantes/full_time_s1 --model_path checkpoints/lingbot-map.pt \
+    --mode windowed --window_size 16 \
+    --use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 --camera_num_iterations 4 \
+    --offload_to_cpu --keep_images_on_cpu --save_predictions $P/eval/final.npz
+```
+Frames: **todos** los del video a 1080x1920, quedándose con el más nítido cerca de cada instante de una cadencia uniforme de 10 fps (`curate_and_synthesize.py --spacing time --stride 3 --frames_dir <candidates_full>`). Sin frames sintéticos: en windowed no aportaron.
+
+| | Muestra 1 (pasillos) | Muestra 2 (fablab) |
+|---|---|---|
+| Frames reales | 657 | 476 |
+| **Error de forma** | **4.75%** (prueba_1: 6.44%) | **2.47%** |
+| Rectitud estimada / croquis | 0.588 / 0.781 | 0.773 / 0.876 |
+| Largo vs croquis | 1.133× | 1.151× |
+
+La muestra 2 sale mejor en todo y sus cinco variantes quedaron entre 2.45% y 3.02%: es un video fácil para el modelo (caminata lenta, frames nítidos), y ahí la configuración casi no importa. La muestra 1 sigue siendo la difícil.
+
+### Nube densa: el modelo mental de la "grilla de puntos de interés" no es lo que hace el pipeline
+
+**La sospecha del usuario era razonable pero no es así:** LingBot-Map no detecta puntos de interés ni genera una grilla. La cabeza de profundidad predice **un valor por píxel** (518x518 = 268,324 puntos por frame; la grilla de 37x37 parches es interna y se sobremuestrea). La nube se veía rala por dos razones ajenas al modelo: el visor dibuja 1 de cada 10 puntos (`downsample_factor`) y las predicciones se guardaban a media resolución.
+
+Lo que sí faltaba era **fusionar**: cada frame aporta su nube completa y los frames vecinos ven lo mismo, así que hay mucho punto repetido. `scripts_context/export_dense_cloud.py` desproyecta cada píxel válido de cada frame real, acumula por bloques (para acotar la RAM) y fusiona por vóxel con open3d:
+
+| | Muestra 1 | Muestra 2 |
+|---|---|---|
+| Puntos crudos | 114.6 M | 83.0 M |
+| Puntos únicos tras fusionar | **10.3 M** | **13.8 M** |
+| Tamaño de vóxel (relativo a la diagonal de la escena) | 0.0002 | 0.0005 |
+
+El primer intento en la muestra 2 con vóxel 0.0002 dio 50.7 M de puntos y un PLY de 1.3 GB, porque su escena es más chica y ese valor relativo equivalía a ~1 mm. Se bajó la resolución a 0.0005 para esa muestra.
+
+**Bug encontrado y corregido:** un frame cuyos píxeles quedaban todos por debajo del percentil de confianza rompía la acumulación (`zero-size array to reduction operation minimum`); ahora se saltea.
+
+### Video de recorrido completo con el renderizador del repositorio original
+
+`demo_render/batch_demo.py` es el pipeline que produce los walkthroughs del README de upstream. Nunca se había corrido end-to-end aquí (ver 2026-09-10: dependencias completas, sin probar). Tres obstáculos reales, ninguno del repo:
+
+1. **Kaolin estaba compilado sin CUDA.** `points_to_octree` fallaba con *"Kaolin built without CUDA, cannot run with GPU tensors"*. Causa: se compiló el 2026-09-10 mientras la GPU estaba caída por el mismatch de NVML, así que el build se hizo solo-CPU sin avisar. Recompilado con `FORCE_CUDA=1 CUDA_HOME=$HOME/cuda-13.0 TORCH_CUDA_ARCH_LIST=8.9`, con `-c env/constraints.txt --no-deps` para que no volviera a subir numpy a 2.x (ver 2026-09-10). Verificado: `kaolin._C.ops.spc` ahora expone los símbolos CUDA y numpy sigue en 1.26.4.
+2. **Faltaban `points_to_morton` / `morton_to_points` en el build.** `scripts_context/render_route.py` los reimplementa en torch (intercalado de bits) y los parchea antes de arrancar; el parche se desactiva solo si el build ya los tiene. El orden de bits se validó contra el propio ejemplo de la documentación de Kaolin (`[0,0,1]→1`, `[0,0,2]→8`, `[0,1,0]→2`).
+3. **`demo_render/demo.py::load_model` no cabe en 8 GB:** carga el checkpoint directo a la GPU y después mueve el modelo, ~9 GB. Se evita por completo usando `--load_predictions` con las predicciones ya calculadas; `scripts_context/npz_for_render.py` convierte el `.npz` de `--save_predictions` al formato que espera el cargador del renderizador (y descarta los frames sintéticos, que no deben aparecer en el recorrido).
+
+También se ajustó `scripts_gpu/run_gpu.sh`: su heurística de puerto trataba a `batch_demo.py` como si fuera `demo.py` y se negaba a lanzar cuando un visor ocupaba el 8080. El renderizador offline no sirve nada, así que ahora se exceptúa.
+
+**Resultado (ambas muestras, `--downsample_factor 5`):**
+
+| | Muestra 1 | Muestra 2 |
+|---|---|---|
+| Frames renderizados | 657 | 476 |
+| Vóxeles del octree (nivel 10) | 936,797 | — |
+| Tiempo total | 75.3 s | 68.5 s |
+| Salidas | `..._pointcloud.mp4` (13 MB), `..._rgb.mp4` (17 MB), `..._combined.mp4` (67 MB) | 40 MB / 13 MB / 108 MB |
+
+En `<prueba>/exports/render_ruta_completa/`. El `_combined` es el video útil para comparar: video original y reconstrucción lado a lado.
+
+### Visualización local
+
+```bash
+python3 scripts_context/view_cloud.py captures/pruebas_reales/unisabana/prueba_2/exports/final_m1_denso.ply --port 8080
+python3 scripts_context/view_cloud.py captures/pruebas_reales/unisabana/prueba_3/exports/final_m2_denso.ply --port 8081
+```
+`view_cloud.py` (nuevo) sirve la nube ya fusionada, con control de tamaño de punto y submuestreo para que el navegador no se ahogue. `view_npz.py` sigue sirviendo el mapa como lo produce el modelo (una nube por frame, con el solape incluido); son dos vistas distintas de lo mismo.
+
+### Limitaciones
+
+- **Los croquis no son ground truth métrico:** son dibujos a mano, sin escala ni norte. Miden forma, no metros. Un `error_pct` de 4.75% no significa 4.75% de error métrico.
+- **Dos muestras, dos croquis.** No alcanza para afirmar que windowed sea mejor en general, solo en estos dos recorridos de interior.
+- **Una corrida por variante.** La inferencia es determinista (verificado), pero diferencias de 1-2 décimas entre variantes vecinas siguen sin ser concluyentes porque el conjunto de frames cambia.
+- **La coincidencia a 1 s ya no sirve para ordenar variantes windowed** (satura en 1.000). Hace falta otra métrica local si se quiere seguir midiendo eso.
+- **La causa de que la curación empeore la deriva es una hipótesis** (índices de frame no uniformes en el RoPE 3D), no una ablación.
+- Los `.npz` de entrada del renderizador (1.9 GB y 1.4 GB) quedan en `render_ruta_completa/`: son intermedios reproducibles con `npz_for_render.py`, se pueden borrar.
+
+## Visor WebGL con navegación en primera persona y control Xbox + nubes más densas (2026-09-28)
+
+**Pedido del usuario:** una interfaz nueva para ver las pruebas en local, con un launcher donde se elija qué prueba mirar; que conserve todo lo que hace el visor actual y además permita recorrer los renders con más libertad, en primera persona tipo gameplay, girando la vista con el mouse y compatible con un control de Xbox. Aparte: aumentar la generación de imagen entre frames y la cantidad de puntos por frame. Sin commits.
+
+### Por qué un visor nuevo y no extender el de `viser`
+
+El visor de `lingbot_map` (y por lo tanto `view_cloud.py` / `view_npz.py`) usa **viser**, que expone una cámara de órbita desde Python. Para mover la cámara a 60 Hz con teclado, mouse capturado o un joystick habría que mandar cada cuadro por websocket desde Python: la latencia hace que no se sienta como un gameplay. La navegación fluida tiene que correr **en el navegador**.
+
+`scripts_context/webgl_viewer/` es una página three.js que carga los `.ply`/`.glb` **ya exportados** (no toca el modelo ni la GPU de inferencia):
+
+| Archivo | Qué hace |
+|---|---|
+| `server.py` | Estáticos + `/api/captures` (recorre `captures/` y arma el selector) + `/data/<archivo>` con HTTP Range para servir nubes de cientos de MB sin cargarlas en RAM |
+| `index.html` | Selector de prueba, panel de navegación, ayuda de controles, barra para recorrer las cámaras |
+| `main.js` | Escena three.js, órbita, primera persona, gamepad, trayectoria y frustums |
+| `vendor/` | three.js 0.160 + addons descargados una vez (el visor funciona sin internet) |
+| `launch.sh` | Arranca el servidor y abre el navegador |
+
+**Los dos modos conviven sobre la misma cámara**, así que cambiar de uno a otro no salta la vista:
+
+- **Órbita:** `OrbitControls` — arrastrar rota, rueda acerca, clic derecho desplaza. Es exactamente lo que ya se podía hacer en viser.
+- **Primera persona:** vuelo libre, sin punto de órbita. Mouse capturado con la Pointer Lock API para mirar (como un shooter), `WASD` para moverse, `Espacio`/`Ctrl` para subir y bajar, `Shift` para correr.
+- **Control Xbox:** Gamepad API del navegador, sin ninguna librería ni driver. Stick izquierdo mueve, stick derecho mira, `RT`/`LT` suben y bajan, `A` corre, `Start` alterna los modos.
+
+**Decisión de diseño que importa:** el mouse-look necesita pointer lock, y el pointer lock exige un clic real del usuario (el navegador no lo concede desde un botón de joystick leído por *polling*). Por eso el gamepad **no depende del pointer lock**: los sticks mueven y giran la cámara con o sin el mouse capturado. Así el control funciona solo, sin tocar el teclado.
+
+### Escala: lo que hacía falta para que se sienta fluido
+
+La escala de cada captura es arbitraria (profundidad monocular, ya documentado). Con una velocidad fija el vuelo quedaba pegado en una escena y disparado en otra. Al cargar, el visor mide la diagonal de la nube y de ahí saca la velocidad por defecto (diagonal/25 por segundo), el rango del control de velocidad y el tamaño de punto. Mismo criterio para los frustums: su tamaño sale del espaciado mediano entre cámaras consecutivas.
+
+### Verificación (navegador real, headless, con los datos de producción)
+
+Probado con Playwright + Chromium, no sólo revisando el código:
+
+| Prueba | Resultado |
+|---|---|
+| Nube fusionada de la muestra 1 (266 MB, 10.3 M puntos) | carga en **3.3 s**, 0 errores de JS |
+| Nube cruda + 657 cámaras (72 MB) | carga en **2.1 s**, trayectoria y frustums dibujados |
+| Cambio órbita ↔ primera persona | correcto, sin salto de vista |
+| Movimiento con `W` | 91% de los píxeles cambian en 1.2 s: la cámara vuela de verdad |
+| Salto a una cámara del video (`cámara 300/656`) | correcto en los dos modos |
+
+**Cinco problemas reales encontrados así, todos corregidos** (ninguno se habría visto revisando el código):
+
+1. **La vista quedaba 180° girada respecto del movimiento.** Con `Euler(pitch, yaw, 0, "YXZ")` la cámara de three.js mira hacia `-Z`, pero el vector de avance se calculaba como `+Z`: al saltar a una cámara se miraba justo al lado opuesto de la escena. Ahora los ejes de movimiento se toman de la cámara ya orientada (`getWorldDirection`), así avanzar siempre coincide con lo que se mira.
+2. **Al saltar a una cámara en primera persona se veía todo rosa:** la vista quedaba *dentro* del marcador que señala esa cámara. Ahora el marcador sólo se muestra en órbita.
+3. **El aviso de "clic para capturar el mouse" oscurecía la escena entera;** ahora es una tarjeta abajo.
+4. **En ventanas de menos de ~760 px de alto el panel de controles tapaba el botón "Cargar"** e interceptaba los clics. Ahora es colapsable, tiene scroll y queda por debajo de los otros paneles.
+5. **La nube de alta densidad no cargaba:** `PLYLoader` de three.js acumula los vértices en arrays JS normales antes de pasarlos a arrays tipados, y con 46.7 M de puntos falla con `Invalid array length`. Se escribió un lector binario propio que llena los arrays tipados directo desde el `ArrayBuffer` (acepta `float` y `double`, con `PLYLoader` como respaldo para cualquier otro layout): **los 1.2 GB pasan a cargar en 3.0 s**.
+
+**Dato honesto sobre la alta densidad:** cargar 46.7 M de puntos funciona, pero *dibujarlos* en el navegador headless con render por software no termina (el screenshot de prueba expira). Esa densidad pide una GPU real; para volar fluido conviene la densidad base.
+
+### Puntos por frame: qué se podía subir y qué no
+
+**El modelo ya predice profundidad por píxel** (518x518 = 268 k por frame): no hay una "grilla de puntos de interés" que se pueda hacer más fina, eso ya estaba aclarado el 2026-09-19. Lo que sí se puede subir es cuánto de eso sobrevive a los dos filtros del exportador: el **tamaño de vóxel** de la fusión y el **percentil de confianza**. Se bajaron los dos:
+
+| | Densidad base (2026-09-19) | Alta densidad (hoy) | Factor |
+|---|---|---|---|
+| Muestra 1 | 10.3 M puntos (vóxel 0.0002, conf. p35) — 266 MB | **30.0 M** (vóxel 0.00015, conf. p15) — 773 MB | **2.9x** |
+| Muestra 2 | 13.8 M puntos (vóxel 0.0005, conf. p35) — 355 MB | **46.7 M** (vóxel 0.00025, conf. p15) — 1202 MB | **3.4x** |
+| Puntos crudos antes de fusionar | 114.6 M / 83.0 M | 149.9 M / 108.6 M | 1.3x |
+
+Los puntos crudos suben 1.3x sólo por bajar el percentil de confianza de 35 a 15 (entran píxeles que antes se descartaban); el resto del aumento viene del vóxel más chico, que conserva detalle que antes se fusionaba.
+
+**El costo es real y hay que decirlo:** los archivos pasan de 266/355 MB a 773/1202 MB, y los puntos que entran con confianza baja son justamente los más ruidosos. Para volar en primera persona con fluidez conviene la densidad base; la alta densidad es para mirar detalle quieto. Las dos quedan en el selector.
+
+**Un intento intermedio falló y vale documentarlo:** con vóxel 0.0001 (el doble de fino) la muestra 1 llegó a consumir **26 GB de RAM** y dejó el equipo con 264 MB libres antes de que lo detuviera. Con `--chunk_frames 30` y vóxel 0.00015 el pico queda en ~13 GB. El exportador acumula por bloques, pero la fusión final junta todos los bloques en memoria: ese es el techo.
+
+### Generación de imagen entre frames: más síntesis
+
+`curate_and_synthesize.py` sintetizaba frames intermedios sólo cuando el salto superaba 1.5x el paso. Se bajó el umbral a 0.8x y se subió el máximo por hueco, sobre **los mismos 657 frames reales** de la configuración ganadora (para que la comparación aísle el efecto de la síntesis):
+
+| | Configuración ganadora (2026-09-19) | Síntesis densa (hoy) |
+|---|---|---|
+| Frames reales | 657 | 657 (idénticos) |
+| Frames sintéticos | 0 | **566** |
+| Total que ve el modelo | 657 | 1223 |
+
+**Un bloqueo real que hubo que arreglar primero:** RAFT no cabía en 8 GB a resolución completa. Su volumen de correlación crece con `(H/8 · W/8)²`: a 1080x1920 pide 3.9 GiB y da OOM. Se agregó `--flow_max_side` (por defecto 960): el flujo se calcula sobre una copia reducida y se escala para deformar los frames a resolución completa. El valor por defecto deja **sin cambios** las corridas ya documentadas (que usaban `candidates` a 540x960).
+
+**Resultado, medido contra el croquis de la ruta real — más síntesis empeora el recorrido:**
+
+| Variante | Frames que ve el modelo | **Error de forma** | Rectitud | Largo vs croquis |
+|---|---|---|---|---|
+| Ganadora del 2026-09-19 (sin síntesis) | 657 | **4.75%** | **0.588** | 1.133 |
+| +566 sintéticos (`keyframe_interval` auto = 4) | 1223 | 7.10% | 0.525 | 1.151 |
+| +566 sintéticos (`keyframe_interval` forzado a 3) | 1223 | 5.89% | 0.487 | 1.135 |
+| Croquis (referencia) | — | — | 0.781 | 1.000 |
+
+**Hubo que correr el control con `keyframe_interval` forzado porque al subir a 1223 frames el propio `demo.py` lo cambia solo de 3 a 4** (`(N+319)//320`): sin ese control, la comparación mezclaba dos efectos. Forzarlo a 3 recupera la mitad del daño (7.10% → 5.89%), o sea que una parte era el cambio de cacheo. **Pero aun aislando eso, la síntesis densa sigue siendo peor que no sintetizar (5.89% contra 4.75%), y la rectitud empeora en las dos variantes.**
+
+Es consistente con lo ya medido el 2026-09-19: meter más frames por metro recorrido hace que la ventana de 16 keyframes cubra menos trayectoria real, y la deriva global crece. La síntesis mejora la continuidad *visual* entre frames vecinos, que es lo que se ve en el video; no mejora la *forma del recorrido*, que es lo que mide el croquis.
+
+**Qué queda entonces:** la configuración recomendada **no cambia** (657 frames reales, sin síntesis, windowed, ventana 16). La síntesis densa queda disponible con `--synth_factor 0.8`, y el arreglo de VRAM (`--flow_max_side`) es útil de todos modos porque antes la síntesis directamente no corría sobre frames a resolución completa. Para "renders más naturales" lo que sí funciona es interpolar el video de salida (abajo), que no toca la geometría.
+
+### Video de recorrido más natural
+
+El renderizador produce un frame por pose de cámara: a 30 fps el recorrido se ve a saltos. Se agregó una pasada de interpolación con compensación de movimiento (`ffmpeg minterpolate`, `mci`+`aobmc`) que lo lleva a 60 fps. No cambia la geometría ni el mapa: es suavizado de reproducción, y es lo único de esta tanda que sí hace el recorrido "más natural" sin tocar la pose.
+
+```bash
+ffmpeg -i <render>_pointcloud.mp4 -vf "minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:vsbmc=1" \
+       -c:v libx264 -crf 18 -pix_fmt yuv420p <render>_pointcloud_60fps.mp4
+```
+Resultado: `final_m1_pointcloud_60fps.mp4` (1311 frames, 16 MB) y `final_m2_pointcloud_60fps.mp4` (949 frames, 52 MB). Es lento (~0.04x tiempo real a 1500x1080): conviene dejarlo en segundo plano.
+
+### Organización de carpetas
+
+Todo lo nuevo queda separado de lo ya documentado, sin mover nada histórico:
+
+```
+captures/pruebas_reales/unisabana/prueba_N/
+  exports/
+    densidad_alta/    <- NUEVO: nube fusionada de alta densidad
+    webgl/            <- NUEVO: nube cruda + <name>_cameras.json (trayectoria)
+    render_ruta_completa/  ... + *_60fps.mp4  <- NUEVO: video interpolado
+  variantes/synth_denso/   <- NUEVO: curación con síntesis densa
+  eval/synth_denso/        <- NUEVO: predicciones de esa variante
+```
+
+### Limitaciones
+
+- El visor se probó en Chromium headless con software rendering; con GPU real va bastante más rápido, pero **no se probó con un control de Xbox físico** (no hay uno conectado a este equipo): el mapeo sigue el estándar de la Gamepad API, que es lo que expone un control de Xbox en Chrome y Firefox.
+- La alta densidad se probó cargando los archivos (3.0 s para 46.7 M de puntos), no midiendo FPS de navegación con ellos en una GPU real.
+- `export_dense_cloud.py` ahora acepta `--float32`: open3d escribe las coordenadas en `double`, que duplica el tamaño sin aportar precisión útil aquí. Las nubes de esta tanda se generaron **antes** de agregar ese flag, así que siguen en `double`; regenerarlas con `--float32` las dejaría en la mitad.
+- La síntesis densa se midió sólo en la muestra 1.
+
+## Mapeo en vivo por WebSocket, flechas en vez de recuadros, y limpieza de carpetas (2026-09-30)
+
+**Pedido del usuario:** (1) los recuadros de cámara tapaban el mapa: cambiarlos por flechas pequeñas que apunten a donde mira la cámara, manteniendo el degradado de color por avance que usa el repositorio original; (2) el mapa de la prueba 1 no sigue la ruta real; (3) que el websocket no sirva sólo para mirar mapas ya hechos, sino para **ver la construcción del mapa en tiempo real**, listo para una prueba de streaming; (4) organizar y reducir carpetas, limpiar lo que no se usa y quitar procesos duplicados, que todo corra sólo cuando haga falta. Sin commits.
+
+### 1. Los recuadros de cámara tapaban el mapa
+
+El visor dibujaba una pirámide de frustum por cámara (8 segmentos cada una, naranja semitransparente). Con 150 pirámides superpuestas, el mapa quedaba detrás de una maraña. Ahora cada cámara es **una flecha**: el asta apunta a donde mira la cámara (eje local +Z, convención OpenCV) y dos barbas cortas marcan la punta — 3 segmentos en vez de 8, y sin volumen que tape.
+
+El color ya no es naranja fijo: se tomó el **mismo degradado del repositorio original** (`lingbot_map/vis/point_cloud_viewer.py` usa `matplotlib.colormaps.get_cmap('viridis')` sobre el índice de frame normalizado). Se reimplementó viridis en JS con 11 puntos de control interpolados, y se aplica **también a la línea de trayectoria** (antes cian plano), así el avance del recorrido se lee por color: violeta al empezar, amarillo al terminar.
+
+### 2. La prueba 1 no seguía la ruta real: era el mapa viejo, y además estaba duplicada
+
+No era un bug del visor. **`prueba_1` y `prueba_2` son el mismo video** — literalmente el mismo archivo en disco (`stat` confirma el mismo inodo: el `source/` de prueba_2 es un hard link del de prueba_1). `prueba_1` guardaba el mapa del 2026-09-14, hecho en **modo streaming**, que es justo el que deriva: recorre 2.63x el largo real y su rectitud es 0.167 contra 0.781 del croquis. `prueba_2` ya tiene el mapa correcto del mismo video (`final_m1`: 4.75% de error de forma, largo 1.13x).
+
+O sea que el render incorrecto y el proceso duplicado eran el mismo problema. Se resolvió consolidando: `prueba_1` conserva su video y un `info.json` que explica por qué está vacía y a dónde mirar; sus `exports/` (215 MB, el mapa que deriva) y `frames/` (982 MB, regenerables con un `ffmpeg`) se borraron. **Los resultados históricos de prueba_1 siguen escritos en esta bitácora** (secciones del 2026-09-14): lo que se borró son archivos derivados, no mediciones.
+
+### 3. Mapeo en vivo: un solo servidor, el modelo sólo cuando se pide
+
+`scripts_stream/live_server.py` (aiohttp) reemplaza al servidor anterior y sirve las dos cosas en el mismo puerto:
+
+| Ruta | Qué hace | ¿Toca la GPU? |
+|---|---|---|
+| `/`, `/vendor/*`, `/main.js` | el visor | no |
+| `/api/captures`, `/data/<archivo>` | nubes ya exportadas (con HTTP Range) | no |
+| `WS /ws` | canal en vivo | — |
+| `POST /api/live/start` \| `/stop` | **carga** \| **libera** el modelo | sí \| libera |
+
+**El modelo se carga recién al iniciar una sesión en vivo y se libera al terminarla** (verificado: VRAM 14 MB en reposo → 5.4-6.2 GB mapeando → 170 MB al detener, que es sólo el contexto CUDA del proceso). Mirar nubes exportadas no toca la GPU.
+
+**Cómo se alimenta el modelo en vivo.** Se usa la primitiva que ya expone el modelo y que `inference_streaming` usa internamente (documentado el 2026-08-25, nunca implementado hasta ahora): acumular `num_scale_frames` frames y correr `forward(..., num_frame_per_block=scale, causal_inference=True)`, y después **un frame a la vez** con `num_frame_per_block=1`, con el KV cache persistente entre llamadas. No se tocó `demo.py` ni `lingbot_map`. El preprocesamiento replica el crop/resize de `load_and_preprocess_images` pero sobre el array en memoria, sin pasar por disco.
+
+**Protocolo:** JSON de texto para estado, y un mensaje binario por frame con cabecera de 72 bytes (`uint32 frame_idx`, `uint32 n_points`, `float32[16] c2w`) seguida de `xyz` en float32 y `rgb` en uint8. El cliente mantiene un buffer preasignado de 6 M de puntos y sólo sube al GPU el tramo nuevo (`addUpdateRange`), así el mapa crece sin recrear la geometría y se puede seguir navegando —órbita, primera persona o control— mientras se construye.
+
+**Tres fuentes:** carpeta de frames (repetir una prueba grabada como si llegara en vivo — la forma reproducible de probar), webcam `/dev/video0`, o un archivo de video.
+
+**Dos bugs reales encontrados al probarlo, corregidos:**
+1. `RuntimeError: Input type (float) and bias type (c10::BFloat16)` — el aggregator está en bf16 y las imágenes llegan en float32. `demo.py` lo resuelve envolviendo la inferencia en `torch.amp.autocast` (`demo.py:559`); faltaba hacer lo mismo.
+2. **Al fallar la inferencia, el checkpoint quedaba ocupando 4.5 GB de VRAM**, porque la limpieza estaba al final del camino feliz. Ahora se libera en un `finally`, pase lo que pase.
+
+**Medido en esta máquina (RTX 2000 Ada, 8 GB):**
+
+| | |
+|---|---|
+| Velocidad | **2.1-2.4 frames/s** (ventana 16, 2 frames de escala, 4 iteraciones de cámara) |
+| VRAM mapeando / en reposo | 5.4-6.2 GB / 170 MB |
+| Carga del modelo | ~8 s, una vez por sesión |
+| Verificación en navegador real | 30 frames → **150.000 puntos acumulados en vivo**, 0 errores de JS |
+| Verificación con la **webcam real** (`/dev/video0`) | 20 frames a **3.9 frames/s**, 80.000 puntos, VRAM de vuelta en 170 MB al terminar |
+
+**Limitación que hay que tener presente antes de la prueba, y no es menor:** en vivo **sólo existe el modo streaming**, y el streaming es justamente el que deriva. El modo `windowed` —el que arregla la deriva (2026-09-19)— necesita la secuencia completa por adelantado, porque procesa ventanas solapadas con atención bidireccional; en vivo no hay futuro que mirar. Así que **el mapa en vivo tiene la deriva del baseline (~2.6x el largo real en la muestra 1); para el mapa bueno hay que reprocesar la grabación después en `windowed`.** El vivo sirve para ver la cobertura mientras se camina, no para el mapa final. A 2.2 frames/s, además, conviene caminar despacio.
+
+### 4. Carpetas: de 33 GB a 14 GB, y de dos servidores a uno
+
+**Proceso duplicado eliminado:** había dos servidores sirviendo lo mismo (`webgl_viewer/server.py` en stdlib y el nuevo de aiohttp). Se borró el viejo; la función que indexa las capturas se movió a `scripts_context/webgl_viewer/captures_index.py` para que exista una sola implementación, y `launch.sh` ahora arranca el único servidor.
+
+**Borrado (todo derivado, reproducible, y con sus resultados ya escritos en esta bitácora):**
+
+| Qué | Espacio |
+|---|---|
+| `.npz` de las variantes exploratorias (se conservan `final_m1.npz` y `final_m2.npz`) | ~9 GB |
+| `.glb` por variante (mapas de experimentos ya concluidos) | 1.8 GB |
+| `.npz` de entrada del renderizador (se rehacen con `npz_for_render.py`) | 3.2 GB |
+| Frames sintéticos de la síntesis densa (resultado negativo ya medido) | 2.0 GB |
+| `exports/` y `frames/` de prueba_1 (mapa que deriva + frames regenerables) | 1.2 GB |
+| Exports superados de prueba_2/3 (`prueba_2.glb`, `v5_mejor.glb`, `.glb` duplicados del `.ply`) | ~0.9 GB |
+
+**Nunca se tocó:** los videos fuente, los croquis de las rutas, las predicciones finales (`final_m1.npz`, `final_m2.npz`), las nubes vigentes (base y alta densidad), los videos de recorrido, las métricas (`combinado.json`, `rutas/*.json`) ni ningún `info.json`.
+
+### Dónde queda cada cosa
+
+```
+captures/pruebas_reales/unisabana/
+  rutas_reales/          CROQUIS de las rutas reales (referencia de forma)
+  prueba_1/source/       VIDEO muestra 1  (mismo archivo que prueba_2: hard link)
+  prueba_2/              MUESTRA 1 (pasillos) — la prueba vigente de ese video
+    source/              el video
+    candidates/          todos los frames a 540x960 (para el analizador)
+    candidates_full/     todos los frames a 1080x1920 (los que ve el modelo)
+    variantes/           curaciones alternativas (full_time_s1 = la que se usa)
+    eval/final_m1.npz    predicciones de la mejor corrida + rutas/ y combinado.json
+    exports/             final_m1_denso.ply, densidad_alta/, webgl/, render_ruta_completa/
+  prueba_3/              MUESTRA 2 (fablab) — misma estructura
+```
+
+### Limitaciones
+
+- El mapa en vivo deriva (explicado arriba): es streaming, no `windowed`.
+- La velocidad en vivo (2.2 frames/s) se midió reproduciendo una carpeta de frames, que es el caso sin latencia de cámara; con la webcam real puede ser algo menor.
+- **No se probó con un control de Xbox físico** ni la sesión en vivo desde la webcam de punta a punta con alguien caminando: lo verificado es la webcam como fuente disponible y el camino completo con carpeta de frames y con video.
+- El visor ahora depende de `aiohttp` (ya estaba en `env/constraints.txt` y en el perfil `render`).
+
+## Primera prueba con desnivel (escaleras): la ventana de 16 pierde la bajada, la de 24 no (2026-10-01)
+
+**Pedido del usuario:** procesar el video nuevo de `~/Downloads`, la primera prueba de una situación en la que cambia la altura del recorrido, ver cómo la resuelve el modelo y dejarlo como mapa visible en la interfaz. Sin commits.
+
+### El video
+
+En `~/Downloads` había dos: `Prueba_1_Desnivel.mp4` y `Prueba_4_Desnivel.mp4`. El primero es **idéntico byte a byte** (mismo md5) a `prueba_3/source/muestra_2_fablab.mp4`, ya mapeado el 2026-09-19, así que no se duplicó. Se procesó el segundo, que es el nuevo: `captures/pruebas_reales/unisabana/prueba_4/` (73.6 s, 1080x1920 vertical, 2203 frames).
+
+**Lo que muestra el video (lectura cuadro por cuadro, no hay croquis de esta ruta):** exterior (0-7 s), entra al edificio y pasa frente a una escalera (8-19 s), **sube** (20-29 s), descanso y una pared blanca sin textura (38-44 s), **sube un segundo tramo** (45-48 s) hasta una sala con sillas, **baja** hacia una salida (56-61 s) y sale por una puerta con la misma reja, el mismo tapete y las mismas flechas amarillas que la de entrada (60-73 s). Es decir, un recorrido de ida y vuelta: sube y vuelve a bajar al nivel de partida.
+
+### Medición: perfil de altura sin escala (`scripts_context/height_profile.py`, nuevo)
+
+Sin ground truth métrico ni croquis, lo que se puede medir es la **forma vertical** del recorrido: proyectar los centros de cámara sobre la vertical y ver si sube, baja y vuelve.
+
+- **La vertical sale del eje X de las cámaras, no del Y.** Con el teléfono sin girar sobre su eje (roll ~ 0), el eje "derecha" de la cámara es siempre horizontal, así que la vertical es la dirección más perpendicular a todos ellos (autovector menor de sum x xᵀ). Promediar el eje Y, que es lo que hace `compare_route.py`, queda sesgado por la inclinación del teléfono, que en una escalera es grande y sistemática: entre los dos criterios hubo 4-11° de diferencia.
+- **No se convierte a metros.** Primero se intentó anclar la escala con la altura de la cámara sobre el piso en los tramos planos, pero sobre el mismo video esa ancla varió 4 veces entre corridas (0.09 a 0.35 unidades), y daba alturas de 5 a 17 m. Se descartó y quedaron dos medidas relativas: `end_over_max` (altura final dividida por el desnivel máximo: ≈0 si vuelve al nivel de partida, ≈1 si se queda arriba) y `horizontal_over_max`.
+- `scripts_context/height_compare.py` (nuevo) pone lado a lado la planta y el perfil de altura de varias corridas.
+
+### Resultado
+
+Mismos 735 frames (cadencia de 10 fps, el más nítido de cada tramo, sin síntesis), mismos flags de 8 GB:
+
+| Variante | Primera subida (22-29 s) | Bajada final (56-62 s) | `end_over_max` | Planta |
+|---|---|---|---|---|
+| windowed, ventana 16 (la recomendada hasta hoy) | sí | **la marca como subida** | **0.946** | limpia, pero no vuelve a la entrada |
+| windowed, ventana 16, solape 8 | sí | la marca como subida | 0.932 | ídem |
+| streaming | sí | sí | −0.022 | vuelve a la entrada, en zigzag |
+| **windowed, ventana 24** | sí | **sí** | **−0.084** | **vuelve a la puerta de entrada, limpia** |
+
+Gráfico: `prueba_4/eval/comparacion_altura.png`. Perfiles individuales en `eval/altura.png` y `eval/variantes/`.
+
+**Lectura:**
+1. **La ventana de 16 pierde la bajada.** La primera subida la ve bien en todas las variantes. En el tramo de 56-62 s, con la cámara mirando escalones hacia abajo, ventana 16 sube otro tanto como la primera escalera, y el mapa termina con la salida un piso por encima de la entrada, que en el video están al mismo nivel. Solapar más las ventanas (8 keyframes) no lo arregla.
+2. **Con ventana 24 vuelve al nivel y a la puerta de entrada,** tanto en altura como en planta. Una explicación plausible, no verificada: con 16 keyframes, a kf=3, una ventana cubre ~4.5 s de video; el tramo de bajada (unos 5 s) más el descanso con pared blanca queda partido entre ventanas, y el empalme entre ventanas pierde el signo del desplazamiento vertical. Con 24 keyframes la ventana cubre ~7 s y el tramo entero entra en una sola.
+3. **Streaming también recupera la bajada** (el KV cache arrastra el contexto de la subida), pero su planta es un zigzag y su largo horizontal se infla: la misma deriva que en la muestra 1.
+4. **Contradice parcialmente lo que se concluyó el 2026-09-19.** Allí, en terreno plano, ventana 24 dio peor forma que ventana 16 (7.10% contra 4.75% de error en la muestra 1). Con desnivel es al revés. Por ahora no hay una ventana que sea la mejor en los dos casos: **16 para recorridos planos, 24 si hay escaleras**. Con una sola prueba de desnivel no alcanza para cambiar la recomendación general.
+5. Ninguna variante resuelve bien la pared blanca sin textura de los 41-44 s: ventana 24 marca ahí un pico y un valle (±0.3 del desnivel) que no están en el video.
+
+### Mapa visible
+
+`windowed, ventana 24` quedó como el mapa de la prueba (`eval/final_m4.npz`, 303 s, 0.41 s/frame; la corrida se reprodujo idéntica, como ya se había visto el 2026-09-19 que la inferencia es determinista):
+
+- `exports/final_m4_denso.ply`: nube fusionada, **32.0 M puntos** (vóxel 0.0003, confianza p35, `--float32`), 457 MB.
+- `exports/webgl/final_m4_raw.ply` + `final_m4_cameras.json`: nube por frame (5.3 M puntos) más las 735 cámaras.
+
+Verificado en el visor (`launch.py`, Chromium headless): aparece en el selector como `pruebas_reales/unisabana/prueba_4` y carga sin errores de JS.
+
+**Un intento falló y vale anotarlo:** la nube con vóxel 0.0002 (la resolución de la muestra 1) murió sin escribir el archivo al fusionar 128 M de puntos crudos (probablemente por RAM; el proceso no dejó traza). Con vóxel 0.0003 y `--chunk_frames 20` el pico fue de 14 GB y terminó bien.
+
+### Limpieza
+
+Se borraron los `.npz` de las variantes (ventana 16 a resolución completa: 1.4 GB; solape, streaming y ventana 24 a resolución reducida: 345 MB cada uno): se rehacen con los comandos de arriba y sus perfiles quedan en `eval/variantes/altura_*.{json,png}`. `prueba_4/` ocupa unos 7 GB, casi todo en `candidates_full/`.
+
+### Limitaciones
+
+- **No hay croquis de esta ruta:** que la salida esté al mismo nivel que la entrada es una lectura visual del video (misma puerta), no una medición.
+- **Una sola prueba con desnivel.** La regla de 16 para plano y 24 con escaleras sale de una muestra por lado.
+- **Las alturas no tienen escala métrica.** El intento de anclarla a la altura de la cámara no fue estable y se descartó.
+- La explicación de por qué la ventana 16 pierde la bajada es una hipótesis: no se hizo ninguna ablación dentro de `lingbot_map`.
+
+## Primera malla por fusión TSDF: la planta se reconoce, pero los frames no son consistentes entre sí (2026-10-01)
+
+**Pedido del usuario:** llevar el mapa un paso más allá, hacia una reconstrucción geométrica que se parezca a un mapa real. Primero se inventarió lo disponible y después se probó el camino más directo. Sin commits.
+
+### Lo que hay para reconstruir
+
+Por cada frame real, `eval/final_mN.npz` trae imagen RGB, profundidad por píxel y su confianza (todo a 518×518), intrínsecos y pose. Es un sensor RGB-D completo, salvo por tres cosas: la escala no es métrica, no hay cierre de bucles y el recorte cuadrado del video vertical pierde el ~44% de cada imagen. Las nubes exportadas son solo XYZ+RGB, sin normales ni malla.
+
+### Método (`scripts_context/tsdf_mesh.py`, nuevo)
+
+- **Fusión TSDF** con `ScalableTSDFVolume` de Open3D 0.19 (ya instalado): cada frame real se integra con su imagen, su profundidad (descartando confianza < p35 y lo más lejano > p97) y su pose. Vóxel de 0.0048 unidades (mediana de profundidad / 150), truncamiento de 4 vóxeles. Después se descartan las piezas sueltas con menos del 0.2% de los triángulos.
+- **Métrica de consistencia:** la malla se proyecta por raycasting desde cada cámara y se compara con la profundidad que predijo el modelo para ese frame. `inlier5` = fracción de píxeles confiables a menos del 5% de la malla. En una fusión con poses y profundidades consistentes debería ser alto en todos los frames.
+- **`--refine`:** arma una malla de consenso solo con los frames con `inlier5` ≥ 0.3, realinea los demás contra ella con ICP punto a punto con escala (Open3D, tres radios decrecientes) y reintegra solo los que quedan por encima de 0.3.
+- **Visor:** ahora carga mallas `.glb` (color por vértice, sin sombreado) y lista `*_malla.glb` como "malla TSDF (superficie)".
+
+### Resultado (muestra 2, fablab, 476 frames)
+
+| | Paso 1 (todos los frames) | Paso 2 (`--refine`) |
+|---|---|---|
+| Triángulos | 1.33 M | 1.28 M |
+| Frames usados | 476 | 347 (285 de consenso + 62 realineados; 129 descartados) |
+| `inlier5` medio (todos los frames) | 0.340 | 0.363 |
+| `inlier5` medio (frames usados) | — | 0.471 (p10: 0.316) |
+| Frames con `inlier5` < 0.2 | 129 | 132 |
+| Error relativo mediano | 6.9% | 6.0% |
+| Tiempo / RAM | 3.2 min / 2.5 GB | 12 min / 2.9 GB |
+
+**Lectura:**
+1. **La planta se reconoce.** En la vista cenital del visor se ven el piso de madera, las paredes, las mesas y las dos salas del fablab, con huecos y manchas en los tramos inconsistentes.
+2. **La inconsistencia no está repartida, está en tramos.** La mayor parte del recorrido coincide entre 40 y 75% con un sesgo de 2-5%, pero en 9-10.5 s y 20-27.5 s cae a 0. En el segundo tramo la malla queda delante de la cámara (hasta 99% más cerca que lo que el frame ve): otros frames pusieron superficies donde este frame ve espacio libre. Son las paredes "dobles" que se esperaban.
+3. **Realinear con una transformación rígida + escala casi no ayuda.** Solo 62 de 191 frames rechazados pasan el umbral después del ICP (en promedio suben de 0.11 a 0.22), y la malla final se ve prácticamente igual. La escala que encuentra el ICP va de 0.43 a 1.22 (p10-p90). Hipótesis, no verificada: el desacuerdo de esos frames no es solo de pose y escala, sino de **forma de la profundidad** (distorsiones dentro del frame), y eso una transformación rígida no lo corrige.
+
+### Implicaciones para el siguiente paso
+
+- Corregir poses sin corregir la profundidad (bundle adjustment clásico) probablemente tampoco alcance por sí solo. Hace falta algo que ajuste también la profundidad por frame: una escala y un sesgo por frame o un campo de deformación, o un método que optimice la geometría directamente a partir de las imágenes (Gaussian Splatting o 2DGS usando la profundidad del modelo solo como guía).
+- La malla actual sirve como **mapa navegable aproximado**, no como geometría de precisión.
+
+### Archivos
+
+`captures/pruebas_reales/unisabana/prueba_3/exports/malla/`: `final_m2_malla.ply` (malla completa, 51 MB), `final_m2_malla.glb` (para el visor, 26 MB) y `final_m2_malla_info.json` (métricas de los dos pasos, coincidencia por frame y reporte del ICP por frame). La malla guardada es la del paso 2.
+
+### Limitaciones
+
+- Una sola muestra (fablab, la de mejor trayectoria). No se probó en la muestra 1 ni en la de desnivel.
+- `inlier5` mide consistencia entre la malla y los propios frames, no exactitud contra el lugar real.
+- Un solo tamaño de vóxel y un solo umbral de consenso (0.3), sin barrido.
+
+## Gaussian Splatting, mismos mapas en todas las pruebas, explorador por categorías, guardado de sesiones en vivo y por qué se cerraba VS Code (2026-10-03)
+
+**Pedido del usuario:** agregar Gaussian Splatting para ver si mejora los resultados; organizar las mallas para que cada prueba tenga los mismos mapas; un explorador de archivos en el visor para organizar y categorizar las pruebas (streaming, desniveles, zonas de la universidad, etc.); y poder guardar o reconstruir un mapa hecho en streaming una vez terminado. En medio, el usuario reportó que VS Code se cerraba solo ("killed, code 9") y pidió diagnosticarlo. Sin commits.
+
+### 1. Gaussian Splatting (`scripts_context/gsplat_train.py`, nuevo)
+
+**Instalación:** `gsplat 1.5.3` (rueda `py3-none-any`; compila sus kernels CUDA en el primer uso con el toolkit de `~/cuda-13.0`, ~2 min, una sola vez) más `jaxtyping 0.3.7`. Se instaló con `-c env/constraints.txt`: numpy sigue en 1.26.4. PyPI estaba inestable y `pip download` se colgaba; la rueda se bajó con `curl` con reintentos. Quedó en el perfil `render` de `env/` y en `tools/doctor.py` (60 OK, 0 FALLA).
+
+**Cómo entrena:** las gaussianas se inicializan desde la profundidad por píxel del modelo (paso de 4 px, confianza > p35, fusión por vóxel 0.0015 de la diagonal), sin COLMAP. Se optimizan contra las imágenes de los frames (L1 + 0.2·D-SSIM), con densificación estándar de gsplat (`DefaultStrategy`) y la profundidad del modelo como guía, con un peso que decae. Exporta un `.ply` en formato 3DGS estándar (armónicos esféricos de grado 1).
+
+**Evaluación honesta:** 1 de cada 8 frames reales queda **fuera** del entrenamiento, y se mide sobre ellos PSNR, SSIM y coincidencia de profundidad (<5% contra la profundidad del modelo). `tsdf_mesh.py --holdout_every 8` hace lo mismo con la malla, integrando solo los otros 7 de cada 8 y proyectando el color de la malla (raycasting, interpolación baricéntrica) desde las cámaras apartadas. Así los dos métodos se comparan en exactamente los mismos frames.
+
+**Barrido en la muestra 2 (fablab, 416 frames de entrenamiento, 60 de prueba):**
+
+| Variante | Iteraciones | Guía de profundidad | Refinar poses | PSNR | SSIM | Coincidencia prof. | Gaussianas | Tiempo |
+|---|---|---|---|---|---|---|---|---|
+| Malla TSDF (referencia) | — | — | — | 12.57 | 0.447 | 0.350 | — | 3 min |
+| A | 15000 | Pearson (solo forma) | sí (2e-5) | 16.93 | 0.604 | 0.145 | 1.89 M | 12.7 min |
+| B | 1000 | Pearson | sí | 17.01 | 0.618 | 0.313 | 1.28 M | 1 min |
+| C | 7000 | Pearson | sí | 17.78 | 0.629 | 0.226 | 1.47 M | 5.4 min |
+| D | 7000 | L1 absoluta | sí | 17.99 | 0.633 | **0.451** | 1.45 M | 5.7 min |
+| E | 7000 | Pearson | no | 17.99 | 0.650 | 0.226 | 1.43 M | 5.2 min |
+| **F (elegida)** | **7000** | **L1 absoluta** | **no** | **18.43** | **0.657** | **0.450** | 1.41 M | 5.1 min |
+
+**Lectura:**
+1. **En imagen, el splatting supera con holgura a la malla:** +5.9 dB de PSNR y SSIM de 0.45 a 0.66 sobre frames que no vio. En las vistas de comparación (`exports/splat/*_vistas.png`) se reconocen máquinas, mesas, personas y el letrero del fablab; donde las poses no encajan sale borroso o corrido.
+2. **Entrenar más empeora lo que no vio.** De 7000 a 15000 iteraciones el PSNR sobre frames apartados baja (17.78 → 16.93) mientras el de entrenamiento sube: sobreajuste.
+3. **La guía de profundidad tiene que ser absoluta.** Con Pearson (solo la forma, invariante a escala por frame) la geometría se aleja de la del modelo (coincidencia 0.15-0.23). Con L1 absoluta se mantiene en 0.45, por encima de la malla TSDF (0.35), y la imagen además mejora.
+4. **Refinar las poses no ayudó** (E y F son mejores que C y D). La rotación aprendida fue chica (0.2° de mediana) y no alcanza a corregir los tramos inconsistentes.
+5. `gsplat_train.py` quedó con F por defecto: 7000 iteraciones, `--depth_loss l1`, `--pose_lr 0`. ~5 min, 3-4.7 GB de VRAM, 140-170 MB de `.ply`.
+
+**Las tres muestras, con la configuración F:**
+
+| | Muestra 1 (pasillos) | Muestra 2 (fablab) | Prueba 4 (desnivel) |
+|---|---|---|---|
+| Frames de prueba | 83 | 60 | 92 |
+| Malla TSDF: PSNR / SSIM / coincidencia | 13.72 / 0.553 / 0.479 | 12.57 / 0.447 / 0.350 | 11.61 / 0.430 / 0.327 |
+| **Splat: PSNR / SSIM / coincidencia** | **19.64 / 0.708** / 0.308 | **18.43 / 0.657** / 0.450 | **18.52 / 0.653** / 0.225 |
+
+En imagen el splat gana en las tres (+5.9 a +6.9 dB). En geometría **no hay un ganador estable**: en la muestra 2 el splat coincide más con la profundidad del modelo que la malla, y en la muestra 1 y la prueba 4 menos. La coincidencia mide acuerdo con la profundidad del propio modelo, que es inconsistente entre frames, así que tampoco es una medida de exactitud real.
+
+### 2. Los mismos mapas en todas las pruebas (`scripts_context/build_maps.py`, nuevo)
+
+Una sola receta, con un archivo y una carpeta fijos por tipo: `nube` (`exports/<n>_denso.ply`), `alta` (`exports/densidad_alta/`), `cruda` (`exports/webgl/<n>_raw.ply` + cámaras), `malla` (`exports/malla/`), `splat` (`exports/splat/`) y `video` (`exports/render_ruta_completa/`). La tarea previa opcional `windowed` reprocesa `frames/` en modo windowed (ventana 24) y usa ese npz para el resto: es lo que corresponde a una sesión en vivo. No rehace lo que ya existe, y cada tarea corre como proceso aparte e informa tiempo y RAM pico.
+
+Estado después de correrlo:
+
+| Prueba | nube | alta | cruda | malla | splat | video | Observación |
+|---|---|---|---|---|---|---|---|
+| `unisabana/prueba_2` (muestra 1) | ✓ | ✓ | ✓ | ✓ nuevo | ✓ nuevo | ✓ | splat: 19.64 dB en frames no vistos |
+| `unisabana/prueba_3` (muestra 2) | ✓ | ✓ | ✓ | ✓ | ✓ nuevo | ✓ | — |
+| `unisabana/prueba_4` (desnivel) | ✓ nuevo | ✓ (la de 32 M) | ✓ | ✓ nuevo | ✓ nuevo | ✓ nuevo | malla de 5.6 M triángulos (la `.glb` se simplifica a 3 M) |
+| `webcam_400/prueba_1` | ✓ nuevo | ✓ nuevo | ✓ nuevo | ✓ nuevo | ✓ nuevo | — | antes solo tenía el `.glb` en streaming; se reprocesó en windowed (ventana 24) |
+| `local_test/prueba_1` | ✓ nuevo | ✓ nuevo | ✓ nuevo | ✓ nuevo | ✓ nuevo | — | ídem, 20 frames |
+| `streaming/fablab/prueba_1` | ✓ | ✓ | ✓ | ✓ | ✓ | — | sesión en vivo de verificación (abajo) |
+
+Prueba 4: la nube de 32 M puntos del 2026-10-01 pasó a ser su `densidad_alta/final_m4_denso_alta.ply`, y se generó una nube base más liviana (vóxel 0.0005, 182 MB). `unisabana/prueba_1` sigue sin mapas a propósito: es el mismo video que `prueba_2` (2026-09-30).
+
+### 3. Explorador de pruebas con categorías (`scripts_context/webgl_viewer/catalog.py` y `explorer.js`, nuevos)
+
+Reemplaza al selector de dos listas del visor. Una "prueba" es cualquier carpeta `prueba_N` o `sesion_*` bajo `captures/`.
+
+- **Agrupar** por zona, categoría (una prueba aparece bajo cada una de sus categorías), carpeta o fecha; **buscar** por texto; **filtrar** con chips de categoría.
+- **Un botón por mapa** (nube, alta, cruda, malla, splat). Todos los mapas de una prueba usan la trayectoria de `exports/webgl/<n>_cameras.json`, así que se orientan y normalizan igual, no solo la nube cruda.
+- **✎ datos:** título, zona de la universidad, categorías (sugeridas o nuevas) y notas, guardados en el `info.json` de la prueba sin tocar el resto de sus claves.
+- **📁 archivos:** árbol perezoso de la carpeta (frames/ tiene miles de archivos); los mapas se cargan con un clic y el resto se abre en otra pestaña.
+- **⚙ construir mapas:** corre `build_maps.py` en segundo plano, con progreso por el WebSocket.
+
+Categorías iniciales cargadas a mano: muestras 1 y 2 = "video grabado, interior, plano" (zonas Pasillos y Fablab); prueba 4 = "video grabado, desnivel, escaleras, interior, exterior"; las dos pruebas con webcam = "webcam, prueba local, interior". Todo se edita desde la interfaz.
+
+**Splats en el visor:** con [gaussian-splats-3d](https://github.com/mkkellogg/GaussianSplats3D) 0.4.7 (vendorizado) dentro de la misma escena three.js, así que órbita, primera persona, control y salto a cámaras funcionan igual. El servidor agrega las cabeceras COOP/COEP para que la librería ordene las gaussianas en un worker con memoria compartida. **Bug encontrado:** por defecto la librería revela la escena de a poco, radialmente desde el centro, y con un render lento parecía que faltaba media escena y que la trayectoria no coincidía. Se verificó superponiendo los centros reales de las gaussianas como puntos: los datos y la transformación estaban bien, era el revelado. Se pasó a revelado instantáneo.
+
+### 4. Guardar y reconstruir una sesión en vivo
+
+`live_server.py` ahora graba, por cada frame de la sesión, lo que predijo el modelo (profundidad, confianza, pose, intrínsecos y la imagen que entró). Al terminar lo deja en `captures/streaming/sin_guardar/sesion_<fecha>/`, con el mismo formato que `--save_predictions` (`eval/sesion.npz` + `frames/` + `info.json` con fuente, fps y parámetros). Una sesión en vivo pasa a ser una prueba más:
+
+1. aparece en el explorador como "sin guardar";
+2. **💾 guardar sesión** le pone título, zona y categorías y la mueve a `<destino>/prueba_N`, o se descarta;
+3. **⚙ construir mapas** con la tarea **windowed** marcada por defecto reprocesa los frames guardados, que es lo que corrige la deriva del streaming.
+
+Verificado de punta a punta por la API con una sesión de 30 frames (repetición del fablab): guardado automático, guardado con nombre (`streaming/fablab/prueba_1`) y las cinco tareas (windowed, nube, cruda, malla, splat) en 12.5 min, sin fallas. Los trabajos y el mapeo en vivo se excluyen mutuamente (comparten la GPU).
+
+### 5. Por qué se cerraba VS Code ("killed", código 9)
+
+**No era un cierre por seguridad, era falta de RAM.** El registro de la sesión de usuario (`journalctl`) lo muestra:
+
+| Hora | Qué corría | Qué pasó |
+|---|---|---|
+| 13:51-13:54 | Video de la prueba 4 (`batch_demo`, 735 frames) + malla TSDF de referencia + Firefox + VS Code | El kernel mata procesos por OOM (13:52:33, 13:54:14) y a las 13:54:14 **systemd-oomd mata el cgroup entero de VS Code: 188 procesos**. Muere VS Code, la sesión de Claude Code y la cadena de mapas en segundo plano |
+| 13:58-13:59 | Relanzamiento del video | El kernel vuelve a matar procesos de VS Code y de Firefox (el cierre que reportó el usuario). El video sí terminó (210 s) |
+
+**Por qué se lleva a VS Code:** todo lo que se lanza desde una terminal de VS Code —incluso con `nohup` o `setsid`— queda dentro del cgroup de la ventana (`app-org.chromium.Chromium-*.scope`). systemd-oomd vigila `user@1002.service` y, si la presión de memoria pasa de 50% durante 20 s, mata el cgroup descendiente que más presiona: el de VS Code, inflado por nuestros trabajos. El swap de la máquina es de 2 GB (estaba en 1.4 GB), así que la presión sube rápido. Esto también explica las sesiones anteriores que se cortaron con la cadena de mapas a mitad de camino.
+
+**Arreglo sin sudo, `scripts_gpu/run_isolated.sh` (nuevo):** corre el comando en su propio scope de systemd del usuario con `MemoryMax` y `MemorySwapMax=0` (el tope por defecto se corrigió durante el arreglo, ver más abajo). Si el trabajo se pasa, el kernel mata solo a ese proceso. Verificado: un proceso que reservó 500 MB con tope de 300 MB murió con código 137, y nada más se vio afectado. Después de los arreglos de abajo, la cadena completa (webcam, prueba local y referencia de la prueba 4) corrió sin un solo corte. Lo usan ahora `run_gpu.sh`, los trabajos de "construir mapas" del visor (que además cancelan todo el grupo de procesos, no solo el primero) y el servidor del visor (`launch.py`), donde corre el mapeo en vivo. `build_maps.py` imprime la RAM pico de cada tarea.
+
+RAM pico medida por tarea (la imprime `build_maps.py`): windowed 9.9-11.0 GB (domina la carga del modelo), nube 3.1 GB con la fusión nueva (antes 12.9 GB), alta 7.9 GB (antes muerta a 16.8 GB), malla 0.5-2.8 GB (la de referencia de la prueba 4 con 5.6 M triángulos, 8.6 GB), splat 2.1-3.9 GB, cruda ≤1.2 GB.
+
+**Segundo incidente durante el arreglo (y su corrección):** con el primer tope (RAM total − 8 GB = 22 GB, más `MemoryHigh`), la nube de alta densidad de la webcam llegó a 16.8 GB. El kernel la mató dentro de su cgroup, como se buscaba, pero en el mismo segundo systemd-oomd **mató GNOME Shell** (46 procesos; el escritorio se reinició solo y VS Code sobrevivió). Dos errores de diseño: el escritorio, Firefox y VS Code ya ocupaban ~14 GB, así que 22 GB de tope no dejaba margen; y `MemoryHigh` frena al proceso con reclamación de memoria, que es justo la presión (PSI) que mide systemd-oomd. Corregido: el tope ahora es **RAM disponible al lanzar − 4 GB** (con piso de 3 GB y techo de RAM total − 8 GB), sin `MemoryHigh`.
+
+**La causa de fondo, corregida en `export_dense_cloud.py`:** cada bloque se guardaba como nube de open3d en float64 (48 bytes por punto) y al final se concatenaban todos y se volvían a fusionar: tres copias de todo en memoria. Ahora hay una primera pasada que fija el tamaño de vóxel con la extensión de la escena (la misma diagonal de antes), y la fusión (promedio de posición y color por vóxel, lo mismo que `voxel_down_sample`) se hace en numpy con float32 + uint8. En la muestra 2, con los mismos parámetros que su nube del 2026-09-19: 83.0 M puntos crudos (igual), **14.7 M puntos finales contra 13.8 M** (+6%, porque ahora la grilla es una sola y fija en vez de una por bloque con tamaños distintos), **3.1 GB de RAM pico** y 62 s.
+
+**Recomendado, con sudo y a decisión del usuario:** agrandar el swap de 2 GB (p. ej. a 16 GB). No elimina el problema, pero evita que la presión se dispare en segundos.
+
+### 6. Bug corregido en `build_maps.py`
+
+La tarea windowed no creaba `eval/` y las pruebas viejas de webcam no la tenían: la inferencia terminaba (137 s) y fallaba al guardar. Ahora la crea.
+
+### Limitaciones
+
+- La comparación malla contra splat se hizo con frames apartados del mismo recorrido, no con otro recorrido del mismo lugar; mide interpolación entre vistas, no generalización a puntos de vista lejanos.
+- La coincidencia de profundidad se mide contra la profundidad del propio modelo, que es inconsistente entre frames (2026-10-01): no es exactitud geométrica.
+- El splat completo (1.3-1.9 M gaussianas) no se pudo dibujar en el navegador de prueba por software; se verificó con una versión reducida (60 mil gaussianas) y la carga del archivo completo, no la navegación con GPU real.
+- Un solo barrido de parámetros, solo en la muestra 2.
+
+## Filtro geométrico previo a la malla y al splat, malla estructural, analizador de contexto en vivo y la matemática del proyecto (2026-10-04)
+
+**Pedido del usuario:**
+
+1. Toda la matemática del proyecto: los modelos y para qué se usan.
+2. Un filtro geométrico previo a la malla TSDF y al Gaussian Splatting que depure los puntos inconsistentes con la geometría: paredes dobles y puntos que representan lo mismo pero quedaron reubicados en otro lugar. Debe buscar las esquinas que forman cuadrados o triángulos, quedarse con esos puntos clave y armar una malla simple, ayudándose con una interpretación por IA del video original.
+3. Que la idea de context-to-image esté presente en el mapeo en streaming y potenciada en el procesamiento de los videos de muestra, para aplicar después el filtro antes del splat.
+4. El filtro no debe afectar la nube de puntos del mapeo con IA.
+
+Sin commits.
+
+**Aclaración hecha antes de empezar:** el proyecto no usa generación de imagen por IA. El "context-to-image" del 2026-09-17 es interpolación por flujo óptico (RAFT), y quedó apagado porque empeoraba la forma del recorrido (2026-09-19). La "interpretación con IA del video" que se agregó ahora es **segmentación semántica** (SegFormer), no generación.
+
+### 1. La matemática: `MATEMATICA.md`
+
+Documento nuevo en la raíz, enlazado desde la parte de arriba del README. Cubre:
+
+- **convenciones de cámara;**
+- **el modelo:** recorte y tokens, DINOv2, GCT con RoPE 3D, cabeza de cámara (`absT_quaR_FoV` → $K$, $[R|t]$), cabeza DPT ($D=e^{x}$, $C=1+e^{x}$), streaming con caché KV y windowed con la similaridad entre ventanas, leída del código ($s$ = mediana del cociente de profundidades);
+- **reconstrucción:** retroproyección, fusión por vóxel, TSDF y marching cubes, Gaussian Splatting (EWA, composición alfa, pérdida, densificación);
+- **análisis de frames:** nitidez, RAFT y DIS, interpolación tipo Super-SloMo;
+- **el filtro nuevo**, completo;
+- **todas las métricas:** Umeyama, rectitud, perfil de altura, `inlier5`, PSNR y SSIM, espesor de pared.
+
+Cada sección dice para qué se usa y en qué archivo está. Los resultados quedan en esta bitácora, no en ese documento.
+
+### 2. El filtro (`scripts_context/geo_filter.py`)
+
+**No toca las predicciones ni la nube.** Lee `eval/<name>.npz` y escribe un archivo aparte, `<out>_filtro.npz`, con:
+
+- una máscara de píxeles conservados;
+- una máscara de píxeles estáticos (para la pérdida fotométrica);
+- la profundidad ajustada a planos;
+- las etiquetas semánticas;
+- la selección de frames;
+- opcionalmente, poses realineadas.
+
+`tsdf_mesh.py` y `gsplat_train.py` lo aplican con `--filter` (y `--no_snap`, `--select_frames`, `--no_align`) **solo a los frames con los que construyen**. Los frames apartados para medir se comparan siempre contra la foto y la profundidad originales.
+
+Etapas, con la matemática en `MATEMATICA.md` §8:
+
+| Etapa | Qué hace | Tiempo (fablab, 476 frames) |
+|---|---|---|
+| Semántica | SegFormer-B0 ADE20K en fp16: quita persona, animal y cielo; agrupa pared, piso y techo | 8 s |
+| Bordes | salto relativo de profundidad > 8% en 3x3 | — |
+| Consistencia multivista | 4 vecinos cercanos + 8 lejanos (revisitas) por solape; apoyo (±6%) y violación de espacio libre (>15% delante) | 4 s |
+| Estructura | vertical por los ejes X de las cámaras; RANSAC vertical de 2 puntos; Manhattan por media circular de 4θ; fusión de capas paralelas del mismo lado; pisos y techos por histograma; tramos rectangulares; esquinas por intersección de 3 planos | 75 s |
+| Malla estructural | un cuadrilátero por tramo de pared y el polígono del piso (recorte de orejas): `<out>_estructura.glb` | — |
+| Ajuste a planos | los píxeles de pared y piso cerca de un tramo se llevan al plano a lo largo de su rayo | 1.5 s |
+| Selección de frames | se conserva un frame cuando el solape con el último conservado baja de 0.7 (el más nítido entre 3) | — |
+
+Para depurar la estructura hubo que corregir dos errores propios:
+
+1. El reajuste por mínimos cuadrados de cada pared tomaba como normal la vertical: la PCA sobre puntos ya proyectados al plano horizontal tiene varianza cero en la vertical. Con eso salía 1 solo plano.
+2. Cuando dos planos no tenían puntos en la zona de solape, la separación daba NaN, y `NaN > umbral` es falso, así que se fusionaban igual. Afectó a la muestra 1 de la tanda con realineación (abajo); las variantes sin realineación se corrieron con el arreglo.
+
+La estructura también necesitó criterios que no estaban en el primer diseño:
+
+- **Alto mínimo** de un tramo de pared, 55% de la altura del ambiente: sin esto, SegFormer marca escritorios y máquinas como pared.
+- **Alineación de Manhattan** a ±25°.
+- **Descarte de paredes oblicuas chicas.**
+
+Resultado: en el fablab, 5 paredes que forman una planta rectangular coherente (`exports/estructura/final_m2_estructura.png`). En la escalera (muestra 4), **dos niveles de piso**, que son los dos pisos de la escalera, más 12 tramos y 11 esquinas.
+
+| | Fablab (m2) | Pasillos (m1) | Escalera (m4) |
+|---|---|---|---|
+| Píxeles conservados | 73.3% | 80.9% | 72.4% |
+| — quitados por semántica / borde | 3.9% / 2.4% | 0.2% / 0.3% | 3.1% / 0.7% |
+| — sin apoyo / violación de espacio libre | 17.0% / 3.4% | 18.6% / 0.06% | 21.4% / 2.5% |
+| Planos RANSAC → capas fusionadas | 60 → 42 fusiones | 45 → 31 | 60 → 43 |
+| Tramos de pared / esquinas / pisos | 5 / 4 / 1 nivel | 6 / 2 / 4 niveles, sin techo | 12 / 11 / 2 niveles |
+| Malla estructural | 60 vértices, 48 triángulos | 197 / 163 | 206 / 172 |
+| Ajustado a planos | 39.4% de los píxeles | 56.2% | 35.7% |
+| Frames seleccionados | 169 de 476 | 343 de 657 | 443 de 735 |
+| Tiempo total | 100 s | 112 s | 195 s |
+
+### 3. Lo que se midió
+
+**Holdout:** 1 de cada 8 frames no se usa para construir. PSNR estático = PSNR sin los píxeles de personas, que no se pueden reconstruir, para que sea comparable con y sin filtro.
+
+**Fablab (m2), Gaussian Splatting, 60 frames apartados:**
+
+| Variante | PSNR | PSNR estático | SSIM | inlier5 | Frames de entrenamiento |
+|---|---|---|---|---|---|
+| Línea base | 18.48 | 18.58 | 0.657 | 0.455 | 416 |
+| Máscaras (semántica, bordes, consistencia) | 18.06 | 18.48 | 0.648 | 0.474 | 416 |
+| Máscaras + ajuste a planos | 18.17 | **18.60** | 0.650 | 0.417 | 416 |
+| + selección de frames | 17.65 | 18.11 | 0.620 | 0.395 | 147 |
+| + realineación por planos | 17.33 | 17.79 | 0.628 | 0.392 | 416 |
+
+**Fablab (m2), malla TSDF, mismos frames apartados:**
+
+| Variante | PSNR | SSIM | inlier5 |
+|---|---|---|---|
+| Línea base | 12.57 | 0.447 | 0.350 |
+| Máscaras | 12.53 | 0.446 | 0.350 |
+| Máscaras + ajuste a planos | **12.63** | **0.463** | 0.268 |
+| + selección de frames | 12.38 | 0.442 | 0.286 |
+| + realineación por planos | 12.63 | 0.461 | 0.308 |
+
+**Las otras dos muestras (splat, PSNR estático; TSDF, SSIM):**
+
+| | Línea base | Ajuste a planos | Con realineación |
+|---|---|---|---|
+| Pasillos (m1), splat | 19.60 | 19.66 | 19.36* |
+| Pasillos (m1), TSDF SSIM | 0.553 | 0.539 | 0.538* |
+| Escalera (m4), splat | 18.71 | 18.91 | 18.95 |
+
+\* Con la estructura afectada por el error de la fusión con NaN (corregido después).
+
+**Paredes dobles: espesor de pared.** Se toman los puntos de pared según SegFormer, retroproyectados de la profundidad del modelo, que caen en el rectángulo de cada tramo y a menos de 0.3 × prof. mediana de su plano. Se mide p90 − p10 de su distancia con signo y la fracción de puntos fuera de la lámina principal (más de 0.05 × prof. mediana). Fablab:
+
+| Puntos | Espesor (ponderado) | Fuera de la lámina |
+|---|---|---|
+| Profundidad del modelo, sin filtrar | 0.258 | 0.517 |
+| Con la máscara de consistencia (margen de violación 0.15, el usado) | 0.251 | 0.511 |
+| Margen de violación 0.05 | 0.232 | 0.503 |
+| Realineación por planos (σ = 15 frames) | 0.242 | **0.417** |
+| Realineación + máscara | 0.234 | **0.406** |
+
+**Forma del recorrido con las poses realineadas** (medida independiente: el croquis no participa del filtro):
+
+- Fablab: error de forma 2.47% → 2.41%.
+- Escalera: `end_over_max` −0.084 → −0.069, es decir, vuelve igual al nivel de partida.
+
+**Lectura:**
+
+1. **Las paredes dobles de estos videos no son dos capas limpias, son frames enteros corridos.** Entre vecinos cercanos, la profundidad proyectada coincide en ±2.5%. Entre revisitas del mismo lugar (vecinos lejanos), la diferencia se reparte en una campana ancha de ±8-15%, sin dos picos. Por eso descartar puntos casi no cambia el espesor: con cualquier margen de violación (0.15 a 0.05) el espesor baja como mucho 10%, y la fracción de puntos fuera de la lámina casi no se mueve. Lo que sí la baja (0.517 → 0.417) es **mover frames enteros**: la realineación por planos.
+
+2. **Pero la realineación empeora las vistas nuevas en dos de tres muestras** (splat: −0.8 dB en el fablab, −0.24 en pasillos, +0.25 en la escalera; TSDF de pasillos: SSIM 0.553 → 0.538). Las paredes quedan más planas, pero las poses dejan de coincidir con las fotos. La medición se hizo con las poses corregidas también en los frames apartados, que es la comparación más favorable. Con las poses originales cae a 12-17 dB, como era de esperar, porque la geometría se movió. **Queda opcional (`--align`) y apagada por defecto.**
+
+   Antes de suavizarla hubo un intento que vale anotar: corregir cada frame por separado mete un zigzag de frame a frame. El recorrido llegó a medir 12 veces su largo y el error de forma subió a 22%. La deriva real entre revisitas es lenta; por eso la corrección se suaviza con una gaussiana de 15 frames.
+
+3. **Máscaras y ajuste a planos (sin realineación) son neutros o algo positivos para el splat en las tres muestras:** +0.02 dB en el fablab, +0.06 en pasillos y +0.21 en la escalera, todo dentro de lo que puede variar una corrida. En la malla depende de la estructura: mejora el SSIM en el fablab (0.447 → 0.463), donde la estructura salió completa, y lo empeora en pasillos (0.553 → 0.539). Ahí la estructura quedó incompleta (ver el punto 5) y el ajuste lleva píxeles a planos equivocados.
+
+   Lo que aportan sobre todo es otra cosa:
+   - el splat filtrado **no reconstruye a las personas** que aparecen en el video (lo que el pedido llamaba "objetos sobrepuestos");
+   - donde la estructura es buena, la malla parte de paredes planas;
+   - el `inlier5` contra la profundidad del modelo baja, pero eso es esperable: se está corrigiendo justo esa profundidad.
+
+4. **La selección de frames no sirve con estos videos.** Con un tercio de los frames el splat entrena un 30% más rápido y con la mitad de gaussianas, pero pierde 0.47 dB, y la malla también empeora. Cada frame aporta vistas que el splat aprovecha.
+
+5. **La malla estructural es lo que se pidió en dos de tres muestras:** una planta simple hecha solo de esquinas (60 vértices en el fablab contra millones de la malla TSDF), con las paredes dobles fusionadas (42 fusiones en el fablab, separación mediana de las capas fusionadas 0.056 × prof. mediana) y con los pisos separados por nivel en la escalera.
+
+   En **pasillos queda incompleta**: 6 tramos y 4 "niveles" de piso en un recorrido plano. La deriva residual del recorrido largo curva las paredes del pasillo, así que no pasan como planos. Además no se detectó techo (la cámara mira mucho al piso), de modo que el alto mínimo de pared se mide contra la profundidad mediana y descarta tramos.
+
+   No reemplaza a la malla ni al splat; sirve como mapa esquemático y como referencia geométrica.
+
+**Configuración que queda en `build_maps.py`** (tareas nuevas `filtro`, `malla_f`, `splat_f`): máscaras + ajuste a planos, sin realineación ni selección. Salidas:
+
+- `exports/estructura/<name>_estructura.glb`;
+- `exports/malla/<name>_filtrado_malla.glb`;
+- `exports/splat/<name>_filtrado_splat.ply`.
+
+El visor los muestra como "estructura (paredes y piso)", "malla TSDF filtrada" y "gaussian splat filtrado", y el modal de construcción ofrece las tres tareas.
+
+### 4. Context-to-image en el mapeo en vivo (`scripts_stream/context_gate.py`)
+
+Analizador de contexto en el servidor en vivo, con casillas nuevas en el panel:
+
+- movimiento por flujo óptico DIS (CPU) y nitidez por varianza del laplaciano;
+- se salta los frames redundantes y envía el más nítido de cada tramo de 36 px de movimiento;
+- opcionalmente genera frames intermedios por flujo bidireccional (Super-SloMo sin red de refinamiento), que entran al modelo solo como contexto.
+
+Cuesta 12 ms por frame en CPU. En la muestra 1 elige 762 de 1970 frames y sintetiza 88.
+
+Medición, reproduciendo todos los frames de cada video por el mismo código del servidor (`replay_live.py`) y comparando contra el croquis:
+
+| | 10 fps fijos (sin analizador) | Analizador | Analizador + síntesis |
+|---|---|---|---|
+| Muestra 1 (pasillos, caminata rápida): frames al modelo | 657 | 764 de 1970 | 764 + 86 sintéticos |
+| — error de forma / rectitud / largo | 9.08% / 0.194 / 2.16 | 9.40% / 0.131 / 2.29 | 11.86% / 0.063 / 2.39 |
+| Muestra 2 (fablab, caminata lenta): frames al modelo | 476 | 375 de 1427 | 375 + 1 sintético |
+| — error de forma / rectitud / largo | 6.49% / 0.546 / 1.59 | **4.18%** / 0.673 / 1.35 | 4.29% / 0.678 / 1.34 |
+| Velocidad (frames al modelo por segundo) | 1.65 | 1.48-1.59 | 1.44-1.46 |
+| VRAM máxima | 6.35-6.40 GB | 6.33-6.43 GB | 6.33-6.45 GB |
+
+En vivo el analizador **ayuda cuando la caminata es lenta**. En el fablab, con un movimiento mediano de 5.4 px por frame, salta los frames casi iguales: llegan 375 al modelo en vez de 476, y el error de forma baja de 6.49% a 4.18%. Es consistente con lo medido el 2026-09-19 (con menos frames por metro, la ventana de 16 cubre más recorrido). En la caminata rápida es neutro o algo peor.
+
+La síntesis no ayuda en vivo. En pasillos empeora (86 frames sintéticos, 11.86%). En el fablab casi no se dispara: hubo un solo salto grande.
+
+Para un robot, que se detiene seguido y genera muchos frames redundantes, el analizador queda **activado por defecto** en el panel, sin síntesis. La deriva del streaming sigue ahí: el mapa bueno sigue saliendo del reproceso en windowed.
+
+**Dos problemas de las sesiones largas en vivo, encontrados al medir.** No se veían porque las pruebas anteriores eran de 30 a 120 frames.
+
+1. **La VRAM crece sin límite.** Cuando un frame sale de la ventana de la caché, el modelo conserva sus tokens especiales (cámara, registro, escala) y los concatena para siempre: 1.1 MB por frame. El servidor ahora los recorta a los de los últimos 64 frames desalojados (`special_keep`), sin tocar `lingbot_map`, y el crecimiento baja a 0.25 MB por frame (medido sobre 400 frames).
+
+   Las primeras corridas de esta medición murieron por falta de memoria cerca del frame 550, pero eso fue sobre todo porque se lanzaron otros procesos en la GPU al mismo tiempo. Error de procedimiento: se repitieron con la GPU exclusiva.
+
+2. **La tabla de posiciones temporales del RoPE 3D tiene 1024 frames** (`max_frame_num`). Verificado con una prueba unitaria: pasado el frame 1024, la parte temporal de la codificación queda vacía (32 dimensiones → 22). Una sesión en vivo de más de 1024 frames (unos 8 minutos a 2 frames/s) se rompía. El servidor construye ahora el modelo con 16384. Queda la salvedad de que el modelo nunca vio distancias temporales tan largas entre los frames de escala y el actual.
+
+También se agregó `keyframe_interval` al vivo (como en `inference_streaming`: los no-keyframes consultan la caché sin quedarse en ella).
+
+### 5. Context-to-image en los videos de muestra
+
+El mismo analizador fuera de línea (`context_gate.py --frames_dir ... [--synth]`) elige los frames de todo el video y escribe un `manifest.json` para `process_and_view.py --manifest`, con los sintéticos marcados para que no entren al mapa. Después se corre windowed (ventana 16):
+
+| | Cadencia uniforme 10 fps (la recomendada) | Analizador | Analizador + síntesis |
+|---|---|---|---|
+| Muestra 1 (rápida): frames | 657 | 764 | 764 + 86 |
+| — error de forma / rectitud / largo | **4.75%** / 0.588 / 1.13 | 7.22% / 0.523 / 1.14 | 5.56% / 0.513 / 1.21 |
+| Muestra 2 (lenta): frames | 476 | 376 | 376 + 1 |
+| — error de forma / rectitud / largo | 2.47% / 0.773 / 1.15 | 1.95% / 0.808 / 1.08 | **1.86%** / 0.815 / 1.07 |
+
+Mismo patrón que en vivo. En la caminata lenta el analizador mejora el recorrido, y con síntesis da **el mejor resultado medido para la muestra 2** (1.86%, contra 2.47%). En la rápida empeora: 7.22%, que es lo mismo que se había visto el 2026-09-19 con la curación por movimiento (6.56%).
+
+Sobre ese peor punto, la síntesis recupera una parte (5.56%) pero no llega a la cadencia uniforme. Esto contradice en parte la lectura del 2026-09-28 (la síntesis densa empeoraba la forma), pero esa medición era otra: sintetizaba en todos los huecos sobre una cadencia uniforme.
+
+Con una muestra de cada tipo no alcanza para cambiar la recomendación. **La cadencia uniforme sigue siendo la configuración recomendada para videos**, y el analizador con síntesis queda como opción para recorridos lentos. Una regla que lo decida sola (por ejemplo, por el movimiento mediano del video) queda pendiente de más muestras.
+
+### Mapas construidos
+
+Con `build_maps.py --tasks filtro,malla_f,splat_f` en las tres pruebas reales, con la configuración elegida (máscaras + ajuste a planos):
+
+| Prueba | Filtro | Malla filtrada | Splat filtrado | RAM pico |
+|---|---|---|---|---|
+| `prueba_3` (fablab) | 101 s | 208 s | 220 s | 6.6 GB |
+| `prueba_2` (pasillos) | 114 s | 394 s | 121 s | 8.5 GB |
+| `prueba_4` (escalera) | 194 s | 509 s | 208 s | 9.5 GB |
+
+Verificado en el visor con Chromium sin GPU: la estructura de la escalera carga y muestra los dos niveles de piso (344 triángulos con las caras dobles), y el splat filtrado del fablab carga (669 331 gaussianas). Las sesiones de las corridas en vivo de esta medición quedaron en la carpeta temporal de la sesión, no en `captures/`.
+
+### Archivos y entorno
+
+- **Nuevos:**
+  - `MATEMATICA.md`;
+  - `scripts_context/geo_filter.py`, `scripts_context/wall_thickness.py`;
+  - `scripts_stream/context_gate.py`, `scripts_stream/replay_live.py`.
+- **Cambiados:**
+  - `tsdf_mesh.py` y `gsplat_train.py`: `--filter`, pérdida fotométrica con máscara, SSIM con máscara, PSNR estático, evaluación con poses originales;
+  - `build_maps.py`: tareas `filtro`, `malla_f`, `splat_f`;
+  - `live_server.py`: analizador, recorte de la caché, `max_frame_num`, `keyframe_interval`, tareas nuevas;
+  - visor: tipos de mapa nuevos y casillas del analizador.
+- **Entorno:** `transformers==5.17.0` en `env/constraints.txt` y en el perfil `render`, y `tools/doctor.py` lo revisa. Los pesos de SegFormer (unos 15 MB) se bajan de Hugging Face en el primer uso.
+
+### Limitaciones
+
+- Tres muestras de interior, una corrida por variante. El splat es estocástico en la densificación; diferencias de ±0.1-0.2 dB no son concluyentes.
+- El espesor de pared se mide contra planos que salen del mismo filtro: con ajuste a planos o realineación la métrica es en parte circular. La forma del recorrido y el PSNR de frames apartados no lo son.
+- SegFormer-B0 confunde objetos (máquinas y escritorios como pared, una mesa como cama). Por eso los criterios de alto y cobertura de los tramos; una variante más grande (B2-B5) no se probó.
+- La estructura asume paredes verticales, casi todas a 90° y planas a lo largo del tramo. En espacios no Manhattan conserva solo las paredes oblicuas grandes, y si el recorrido tiene deriva residual (pasillos largos) las paredes se curvan y no se detectan.
+- La consistencia multivista necesita revisitas. En pasillos, sin vueltas al mismo lugar, hay 1.3 vecinos lejanos por frame y la violación de espacio libre casi no actúa (0.06% de los píxeles).
+- No hay generación de imagen por IA en ningún paso.
 
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.

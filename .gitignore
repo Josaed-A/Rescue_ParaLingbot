@@ -31,3 +31,7 @@ captures/
 
 # máscaras de cielo que genera demo.py --mask_sky junto a cada carpeta de imágenes
 *_sky_masks/
+
+# caches de Python de los scripts propios
+scripts_*/__pycache__/
+scripts_context/webgl_viewer/__pycache__/

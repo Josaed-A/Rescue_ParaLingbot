@@ -34,10 +34,10 @@ ALL_PROFILES = ["core", "vis", "gpu", "flashinfer", "render", "bench"]
 IMPORTS = {
     "core": ["numpy", "scipy", "cv2", "PIL", "einops", "safetensors", "huggingface_hub", "tqdm",
              "torch", "torchvision"],
-    "vis": ["matplotlib", "trimesh", "onnxruntime", "requests", "viser"],
+    "vis": ["matplotlib", "trimesh", "onnxruntime", "requests", "viser", "aiohttp"],
     "gpu": ["psutil", "pynvml"],
     "flashinfer": ["flashinfer"],
-    "render": ["open3d", "yaml", "aiohttp", "kaolin"],
+    "render": ["open3d", "yaml", "aiohttp", "kaolin", "gsplat", "transformers"],
     "bench": ["open3d", "plyfile", "evo", "OpenEXR", "Imath", "yaml"],
 }
 # Oldest Linux driver for each CUDA runtime a torch wheel can be built against.

@@ -31,6 +31,7 @@ if ! printf '%s\n' "${pre_args[@]}" | grep -qx -- --port; then
   if [ -z "$port" ]; then
     case "$*" in
       *--no_serve*) ;;
+      *batch_demo.py*) ;;   # the offline renderer writes a file, it serves nothing
       *process_and_view.py*) port=8082 ;;
       *demo.py*) port=8080 ;;
     esac
@@ -49,6 +50,7 @@ if ! "$here/gpu_preflight.sh" "${pre_args[@]}"; then
 fi
 
 echo "run_gpu.sh: suspensión bloqueada mientras corra el comando (Ctrl+C para detenerlo y liberar la GPU)."
-exec systemd-inhibit --what=sleep:idle:handle-lid-switch --mode=block \
+# En su propio cgroup con tope de RAM: si se queda sin memoria muere este comando, no VS Code
+exec "$here/run_isolated.sh" --name gpu -- systemd-inhibit --what=sleep:idle:handle-lid-switch --mode=block \
   --who="LingBot-Map" --why="Proceso CUDA activo: suspender rompe nvidia_uvm" \
   "$@"

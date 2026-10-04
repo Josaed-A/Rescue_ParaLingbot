@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>GARDIAN · Visor WebGL de pruebas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0b0d10; overflow: hidden;
+               font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #e6e8eb; }
+  #canvas-wrap { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .panel { position: fixed; background: rgba(18, 20, 24, 0.88); border: 1px solid #2a2e35;
+           border-radius: 10px; padding: 12px 14px; backdrop-filter: blur(4px); font-size: 13px; }
+  /* Explorador de pruebas (reemplaza al selector de dos listas) */
+  #explorer { top: 14px; left: 14px; width: 380px; max-height: calc(100vh - 86px);
+        display: flex; flex-direction: column; padding: 10px 12px; }
+  #explorer .ex-head { display: flex; justify-content: space-between; align-items: center; }
+  #explorer h1 { font-size: 14px; margin: 0; font-weight: 600; color: #fff; }
+  #explorer .ex-head button { background: #1b1e24; color: #e6e8eb; border: 1px solid #33383f;
+        border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 13px; }
+  #explorer .ex-tools { display: flex; gap: 6px; margin-top: 8px; }
+  #explorer input, #explorer select, #modal input, #modal select, #modal textarea {
+        background: #1b1e24; color: #e6e8eb; border: 1px solid #33383f; border-radius: 6px;
+        padding: 6px 8px; font-size: 12px; box-sizing: border-box; font-family: inherit; }
+  #ex-search { flex: 1; min-width: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .chip { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: #252a32; color: #c3c9d1;
+        border: 1px solid #333a44; cursor: pointer; user-select: none; white-space: nowrap; }
+  .chip.on { background: #2f6fed; border-color: #2f6fed; color: #fff; }
+  .chip.c-streaming { border-color: #37e6c4; } .chip.c-desnivel, .chip.c-escaleras { border-color: #f5a524; }
+  .chip.c-sin-guardar { border-color: #ef4444; color: #fca5a5; }
+  .chip .x { margin-left: 4px; color: #9aa3ad; }
+  #ex-tree { overflow-y: auto; margin-top: 8px; flex: 1; min-height: 60px; padding-right: 2px; }
+  .ex-group > .gh { display: flex; justify-content: space-between; cursor: pointer; padding: 5px 2px;
+        color: #9aa3ad; font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+        border-bottom: 1px solid #23272e; }
+  .ex-group.collapsed .ex-items { display: none; }
+  .ex-card { border: 1px solid #262b33; border-radius: 8px; padding: 7px 8px; margin: 6px 0;
+        background: rgba(27,30,36,.55); }
+  .ex-card.active { border-color: #2f6fed; }
+  .ex-card .t { font-weight: 600; color: #fff; font-size: 13px; }
+  .ex-card .sub { color: #7d8792; font-size: 11px; margin-top: 1px; word-break: break-all; }
+  .ex-card .zona { color: #c3c9d1; font-size: 11px; margin-top: 2px; }
+  .ex-maps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .ex-maps button { font-size: 11px; padding: 3px 7px; border-radius: 5px; border: 1px solid #33383f;
+        background: #1b1e24; color: #e6e8eb; cursor: pointer; }
+  .ex-maps button.loaded { background: #2f6fed; border-color: #2f6fed; color: #fff; }
+  .ex-maps .none { color: #7d8792; font-size: 11px; }
+  .ex-actions { display: flex; gap: 10px; margin-top: 6px; font-size: 11px; }
+  .ex-actions a { color: #7fb2ff; cursor: pointer; text-decoration: none; }
+  .ex-files { margin-top: 6px; font-size: 11px; border-left: 1px solid #2a2e35; padding-left: 6px; }
+  .ex-files .row { display: flex; justify-content: space-between; gap: 6px; padding: 1px 0; }
+  .ex-files .row .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ex-files .row .s { color: #7d8792; white-space: nowrap; }
+  .ex-files .dir > .row .n { color: #7fb2ff; cursor: pointer; }
+  .ex-files .file .n a { color: #c3c9d1; text-decoration: none; }
+  .ex-files .file .n a.map { color: #37e6c4; }
+  .ex-files .kids { padding-left: 10px; }
+  #job-bar { margin-top: 8px; border-top: 1px solid #23272e; padding-top: 6px; font-size: 11px; }
+  #job-bar .bar { height: 5px; background: #23272e; border-radius: 3px; overflow: hidden; margin: 4px 0; }
+  #job-bar .bar div { height: 100%; background: #37e6c4; width: 0; transition: width .3s; }
+  #job-bar .log { color: #7d8792; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #job-bar button { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid #33383f;
+        background: #1b1e24; color: #e6e8eb; cursor: pointer; }
+
+  /* Ventana modal: editar datos de una prueba / construir mapas */
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 20; display: flex;
+        align-items: center; justify-content: center; }
+  #modal .box { width: 460px; max-width: calc(100vw - 32px); max-height: calc(100vh - 40px); overflow-y: auto;
+        background: #14171c; border: 1px solid #2a2e35; border-radius: 12px; padding: 16px 18px; font-size: 13px; }
+  #modal h2 { margin: 0 0 4px; font-size: 15px; color: #fff; }
+  #modal .sub { color: #7d8792; font-size: 11px; margin-bottom: 10px; word-break: break-all; }
+  #modal label { display: block; color: #9aa3ad; font-size: 11px; margin: 10px 0 3px; }
+  #modal input[type=text], #modal textarea, #modal select { width: 100%; }
+  #modal textarea { min-height: 60px; resize: vertical; }
+  #modal .row { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; }
+  #modal button { padding: 7px 12px; border-radius: 6px; border: 1px solid #33383f; background: #1b1e24;
+        color: #e6e8eb; cursor: pointer; font-size: 12px; }
+  #modal button.primary { background: #2f6fed; border-color: #2f6fed; color: #fff; font-weight: 600; }
+  #modal button.danger { background: #7f1d1d; border-color: #b91c1c; color: #fff; }
+  #modal .task { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid #1f2329; }
+  #modal .task input { margin-top: 2px; }
+  #modal .task .d { color: #7d8792; font-size: 11px; }
+  #modal .task .have { color: #37e6c4; font-size: 11px; }
+  #modal .warn { color: #f5a524; font-size: 11px; margin-top: 8px; }
+  #modal .section { border-top: 1px solid #23272e; margin-top: 14px; padding-top: 4px; }
+  #status { margin-top: 8px; font-size: 12px; color: #9aa3ad; white-space: pre-line; }
+
+  #hud { top: 14px; right: 14px; width: 300px; }
+  #hud h2 { font-size: 13px; margin: 0 0 6px; color: #fff; }
+  #hud .field { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+  #hud .field span:first-child { color: #9aa3ad; }
+  #hud input[type=range] { width: 130px; }
+  #hud .modebtn { display: flex; gap: 6px; margin-top: 8px; }
+  #hud .modebtn button { flex: 1; padding: 8px 6px; border-radius: 6px; border: 1px solid #33383f;
+        background: #1b1e24; color: #e6e8eb; cursor: pointer; font-size: 12px; }
+  #hud .modebtn button.active { background: #2f6fed; border-color: #2f6fed; color: #fff; }
+  #hud .toggle { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+
+  /* En una ventana baja este panel llegaba a tapar el botón Cargar del selector:
+     se limita su alto, se le da scroll y queda por debajo de los otros paneles. */
+  #controls-help { bottom: 14px; left: 14px; width: 320px; font-size: 12px; line-height: 1.5;
+        color: #c3c9d1; z-index: 1; max-height: calc(100vh - 300px); overflow-y: auto; }
+  #controls-help { left: 410px; }
+  #controls-help h2 { font-size: 13px; margin: 0; color: #fff; display: flex;
+        justify-content: space-between; align-items: center; cursor: pointer; }
+  #controls-help h2 .chev { color: #7fb2ff; font-size: 11px; }
+  #controls-help.collapsed { max-height: 42px; overflow: hidden; }
+  #controls-help .body { margin-top: 6px; }
+  #explorer, #hud, #camscrub { z-index: 5; }
+  #controls-help table { width: 100%; border-collapse: collapse; }
+  #controls-help td { padding: 1px 0; vertical-align: top; }
+  #controls-help td:first-child { color: #7fb2ff; white-space: nowrap; padding-right: 8px; font-family: monospace; }
+  #controls-help .section { color: #9aa3ad; margin-top: 6px; font-size: 11px; text-transform: uppercase;
+        letter-spacing: 0.04em; }
+
+  #camscrub { bottom: 14px; right: 14px; width: 300px; }
+  #camscrub h2 { font-size: 13px; margin: 0 0 8px; color: #fff; }
+  #camscrub .row { display: flex; gap: 6px; align-items: center; }
+  #camscrub button { padding: 6px 10px; border-radius: 6px; border: 1px solid #33383f;
+        background: #1b1e24; color: #e6e8eb; cursor: pointer; }
+  #camscrub input[type=range] { flex: 1; }
+
+  #crosshair { position: fixed; top: 50%; left: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
+        border: 1px solid rgba(255,255,255,0.7); border-radius: 50%; display: none; pointer-events: none; }
+  #pointerlock-hint { position: fixed; inset: 0; display: none; align-items: flex-end; justify-content: center;
+        padding-bottom: 12vh; background: transparent; font-size: 15px; text-align: center; cursor: pointer; }
+  #pointerlock-hint div { max-width: 460px; background: rgba(18,20,24,0.92); border: 1px solid #2a2e35;
+        border-radius: 10px; padding: 14px 18px; }
+  #pointerlock-hint p { margin: 4px 0; }
+
+  #live { top: 300px; right: 14px; width: 300px; }
+  #live h2 { font-size: 13px; margin: 0 0 8px; color: #fff; display: flex;
+        justify-content: space-between; align-items: center; }
+  #live .dot { width: 9px; height: 9px; border-radius: 50%; background: #555; display: inline-block; }
+  #live .dot.on { background: #37e6c4; box-shadow: 0 0 8px #37e6c4; }
+  #live select, #live input[type=text] { width: 100%; box-sizing: border-box; margin-top: 5px;
+        background: #1b1e24; color: #e6e8eb; border: 1px solid #33383f; border-radius: 6px;
+        padding: 6px 8px; font-size: 12px; }
+  #live .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+  #live .grid label { font-size: 11px; color: #9aa3ad; }
+  #live .grid input { width: 100%; box-sizing: border-box; background: #1b1e24; color: #e6e8eb;
+        border: 1px solid #33383f; border-radius: 6px; padding: 5px 6px; font-size: 12px; }
+  #live .row { display: flex; gap: 6px; margin-top: 8px; }
+  #live .row button { flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #33383f;
+        background: #1b1e24; color: #e6e8eb; cursor: pointer; font-size: 12px; font-weight: 600; }
+  #live #live-start { background: #16a34a; border-color: #16a34a; color: #fff; }
+  #live #live-stop { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+  #live #live-start:disabled, #live #live-stop:disabled { opacity: 0.4; cursor: default; }
+  #live .stat { display: flex; justify-content: space-between; font-size: 12px; margin-top: 5px; }
+  #live .stat span:first-child { color: #9aa3ad; }
+  #live .ctx { margin-top: 7px; font-size: 11px; color: #c9ced4; display: flex; flex-direction: column; gap: 3px; }
+  #live .ctx label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  #live-msg { margin-top: 7px; font-size: 11px; color: #9aa3ad; min-height: 15px; }
+
+  /* Vista del video real. Por defecto es la ventanita; con .full pasa a ocupar
+     la pantalla y el render queda en la esquina. */
+  #cam-view { position: fixed; left: 14px; bottom: 14px; width: 300px; z-index: 6;
+        border: 1px solid #2a2e35; border-radius: 10px; overflow: hidden;
+        background: #000; display: none; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
+  #cam-view img { display: block; width: 100%; height: auto; }
+  #cam-view .bar { position: absolute; top: 0; left: 0; right: 0; padding: 4px 8px;
+        font-size: 11px; color: #e6e8eb; background: linear-gradient(rgba(0,0,0,.75), transparent);
+        display: flex; justify-content: space-between; align-items: center; }
+  #cam-view .bar button { background: rgba(27,30,36,.9); color: #e6e8eb; border: 1px solid #33383f;
+        border-radius: 5px; font-size: 11px; padding: 2px 7px; cursor: pointer; }
+  #cam-view.full { left: 0; bottom: 0; top: 0; right: 0; width: auto; border-radius: 0;
+        display: flex; align-items: center; justify-content: center; }
+  #cam-view.full img { width: auto; height: 100%; max-width: 100%; }
+  /* cuando el video está en grande, el render 3D se va a la esquina */
+  body.cam-full #canvas-wrap { position: fixed; left: auto; right: 14px; bottom: 14px;
+        top: auto; width: 300px; height: 200px; z-index: 7; border: 1px solid #2a2e35;
+        border-radius: 10px; overflow: hidden; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
+  body.cam-full #crosshair { display: none !important; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap"></div>
+<div id="crosshair"></div>
+<div id="pointerlock-hint"><div>
+  <p><strong>Modo primera persona</strong></p>
+  <p>Clic para capturar el mouse y mirar alrededor.<br>WASD para moverte, Espacio/Ctrl para subir/bajar, Shift para correr.<br>Esc para salir. También funciona con un control de Xbox conectado.</p>
+</div></div>
+
+<div id="cam-view">
+  <div class="bar"><span id="cam-view-label">cámara</span>
+    <button id="cam-view-swap">pantalla completa</button></div>
+  <img id="cam-view-img" alt="video de referencia">
+</div>
+
+<div id="explorer" class="panel">
+  <div class="ex-head"><h1>GARDIAN · pruebas</h1><button id="ex-refresh" title="volver a leer captures/">⟳</button></div>
+  <div class="ex-tools">
+    <input id="ex-search" type="text" placeholder="buscar: título, zona, categoría, carpeta">
+    <select id="ex-group">
+      <option value="zona">por zona</option>
+      <option value="categoria">por categoría</option>
+      <option value="sitio">por carpeta</option>
+      <option value="fecha">por fecha</option>
+    </select>
+  </div>
+  <div id="ex-filter" class="chips" title="filtrar por categoría (clic para activar)"></div>
+  <div id="ex-tree"></div>
+  <div id="job-bar" class="hidden"></div>
+  <div id="status">Buscando pruebas en captures/...</div>
+</div>
+<div id="modal" class="hidden"><div class="box" id="modal-box"></div></div>
+
+<div id="hud" class="panel">
+  <h2>Navegación</h2>
+  <div class="modebtn">
+    <button id="mode-orbit" class="active">Órbita</button>
+    <button id="mode-fps">Primera persona</button>
+  </div>
+  <div class="field"><span>Tamaño de punto</span><input id="point-size" type="range" min="0.0005" max="0.05" step="0.0005" value="0.006"></div>
+  <div class="field"><span>Velocidad (1ª persona)</span><input id="fps-speed" type="range" min="0.2" max="15" step="0.2" value="3"></div>
+  <div class="toggle"><input id="show-cams" type="checkbox" checked><label for="show-cams">Mostrar trayectoria/cámaras</label></div>
+  <div class="toggle"><input id="show-axes" type="checkbox"><label for="show-axes">Ejes de referencia</label></div>
+  <div class="toggle"><input id="flip-v" type="checkbox"><label for="flip-v">Invertir vertical</label></div>
+  <div class="field"><span>Gamepad</span><span id="gamepad-status">no detectado</span></div>
+  <div class="field"><span>FPS render</span><span id="fps-counter">--</span></div>
+</div>
+
+<div id="live" class="panel">
+  <h2>Mapeo en vivo <span id="live-dot" class="dot"></span></h2>
+  <select id="live-source">
+    <option value="folder">Carpeta de frames (repetir una prueba)</option>
+    <option value="webcam">Webcam en vivo (/dev/video0)</option>
+    <option value="video">Archivo de video</option>
+  </select>
+  <select id="live-device" style="display:none"></select>
+  <input id="live-path" type="text" placeholder="ruta de la carpeta o del video"
+         value="captures/pruebas_reales/unisabana/prueba_2/variantes/full_time_s1/frames">
+  <div class="grid">
+    <div><label>fps</label><input id="live-fps" type="number" value="4" min="0.5" max="30" step="0.5"></div>
+    <div><label>máx. frames</label><input id="live-max" type="number" value="120" min="0" step="10"></div>
+    <div><label>puntos/frame</label><input id="live-pts" type="number" value="6000" min="500" step="500"></div>
+    <div><label>conf. (percentil)</label><input id="live-conf" type="number" value="30" min="0" max="90" step="5"></div>
+  </div>
+  <div class="row">
+    <button id="live-start">Iniciar</button>
+    <button id="live-stop" disabled>Detener</button>
+  </div>
+  <div class="ctx">
+    <label title="Salta frames casi iguales al anterior y elige el más nítido de cada tramo (flujo óptico DIS). Ignora el fps: el ritmo lo pone el movimiento de la cámara.">
+      <input type="checkbox" id="live-ctx" checked> analizador de contexto</label>
+    <label title="En saltos grandes genera frames intermedios por flujo óptico; entran al modelo solo como contexto, no se dibujan ni se graban.">
+      <input type="checkbox" id="live-synth"> sintetizar frames intermedios</label>
+  </div>
+  <div class="stat"><span>frames</span><span id="live-frames">0</span></div>
+  <div class="stat" id="live-ctx-row" style="display:none"><span>contexto</span><span id="live-ctx-stat">—</span></div>
+  <div class="stat"><span>fps real</span><span id="live-rate">—</span></div>
+  <div class="stat"><span>VRAM</span><span id="live-vram">—</span></div>
+  <div class="stat"><span>puntos en el mapa</span><span id="live-points">0</span></div>
+  <div id="live-msg">el modelo se carga recién al iniciar</div>
+</div>
+
+<div id="controls-help" class="panel">
+  <h2 id="help-toggle">Controles <span class="chev">ocultar ▾</span></h2>
+  <div class="body">
+  <div class="section">Órbita (mouse)</div>
+  <table>
+    <tr><td>arrastrar</td><td>rotar alrededor del objetivo</td></tr>
+    <tr><td>rueda</td><td>acercar / alejar</td></tr>
+    <tr><td>clic derecho + arrastrar</td><td>desplazar de lado a lado / arriba-abajo</td></tr>
+  </table>
+  <div class="section">Primera persona (teclado + mouse)</div>
+  <table>
+    <tr><td>clic</td><td>capturar el mouse (mirar alrededor)</td></tr>
+    <tr><td>W A S D</td><td>avanzar / izquierda / atrás / derecha</td></tr>
+    <tr><td>espacio / ctrl</td><td>subir / bajar</td></tr>
+    <tr><td>shift</td><td>correr</td></tr>
+    <tr><td>esc</td><td>soltar el mouse</td></tr>
+  </table>
+  <div class="section">Control Xbox (en 1ª persona)</div>
+  <table>
+    <tr><td>stick izq.</td><td>moverse</td></tr>
+    <tr><td>stick der.</td><td>mirar alrededor</td></tr>
+    <tr><td>RT / LT</td><td>subir / bajar</td></tr>
+    <tr><td>A</td><td>correr</td></tr>
+    <tr><td>Start</td><td>cambiar órbita ↔ 1ª persona</td></tr>
+  </table>
+  </div>
+</div>
+
+<div id="camscrub" class="panel">
+  <h2>Recorrer las cámaras del video</h2>
+  <div class="row">
+    <button id="cam-prev">◀</button>
+    <input id="cam-slider" type="range" min="0" max="0" value="0" step="1">
+    <button id="cam-next">▶</button>
+  </div>
+  <div id="cam-label" style="margin-top:6px; color:#9aa3ad;">sin cámaras cargadas</div>
+</div>
+
+<script>
+  // colapsable, y colapsado de entrada si la ventana es baja
+  (function () {
+    const h = document.getElementById("controls-help");
+    const t = document.getElementById("help-toggle");
+    const set = (c) => { h.classList.toggle("collapsed", c);
+      t.querySelector(".chev").textContent = c ? "mostrar ▸" : "ocultar ▾"; };
+    t.addEventListener("click", () => set(!h.classList.contains("collapsed")));
+    set(true);   // el explorador ocupa la izquierda: la ayuda arranca plegada
+  })();
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/": "./vendor/addons/"
+  }
+}
+</script>
+<script type="module" src="./main.js"></script>
+<script type="module" src="./explorer.js"></script>
+</body>
+</html>

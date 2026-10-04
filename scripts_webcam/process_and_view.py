@@ -31,8 +31,11 @@ def main():
     p.add_argument("--image_folder", type=str, required=True)
     p.add_argument("--model_path", type=str, required=True)
     p.add_argument("--first_k", type=int, default=None)
-    p.add_argument("--glb_out", type=str, required=True)
-    p.add_argument("--preview_png", type=str, required=True)
+    p.add_argument("--glb_out", type=str, default=None,
+                    help="Export the map as .glb (omit to skip: the export is slow and "
+                         "memory-hungry, which is wasted work for parameter experiments).")
+    p.add_argument("--preview_png", type=str, default=None,
+                    help="Quick 2D projections of the map (omit to skip).")
     p.add_argument("--port", type=int, default=8082)
     p.add_argument("--conf_threshold", type=float, default=1.5)
     p.add_argument("--downsample_factor", type=int, default=10)
@@ -65,6 +68,11 @@ def main():
                          "path clones the KV cache on every attention call; "
                          "FlashInfer's paged KV cache is the memory-efficient path "
                          "the upstream README recommends for streaming on GPU.")
+    p.add_argument("--preprocess_mode", choices=["crop", "pad"], default="crop",
+                    help="crop (demo.py's own behaviour): width 518, centre-crop the "
+                         "height to 518 — a portrait video loses ~44%% of each frame. "
+                         "pad: fit the whole frame in 518x518 with white bars, keeping "
+                         "the full field of view at lower effective resolution.")
     p.add_argument("--rotate_clockwise_90", action="store_true",
                     help="demo.py's own option: rotate frames before preprocessing. A "
                          "portrait video becomes landscape, so the 518-wide crop keeps "
@@ -73,13 +81,30 @@ def main():
     p.add_argument("--camera_num_iterations", type=int, default=1,
                     help="Camera head refinement iterations (demo.py default 4; the "
                          "research runs used 1 for speed).")
+    p.add_argument("--mode", choices=["streaming", "windowed"], default="streaming",
+                    help="demo.py's own modes. streaming: causal, one frame at a time. "
+                         "windowed: overlapping windows, each processed with bidirectional "
+                         "attention inside the window (demo.py's option for long sequences).")
+    p.add_argument("--window_size", type=int, default=16,
+                    help="windowed mode: keyframes per window (drives KV memory).")
+    p.add_argument("--overlap_keyframes", type=int, default=None,
+                    help="windowed mode: keyframes shared between consecutive windows.")
+    p.add_argument("--keyframe_interval", type=int, default=None,
+                    help="Override demo.py's auto value ((N+319)//320). Every Nth frame "
+                         "is a keyframe whose KV stays cached, so a larger interval makes "
+                         "the same sliding window span more of the walk (more temporal "
+                         "context) at a coarser sampling of it.")
     p.add_argument("--manifest", type=str, default=None,
                     help="manifest.json from scripts_context/curate_and_synthesize.py. "
                          "Synthetic frames are fed to the model (temporal context for "
                          "pose) but removed before building the map.")
     p.add_argument("--save_predictions", type=str, default=None,
-                    help="Save poses, depth, confidence and images (half resolution) "
-                         "to this .npz for scripts_context/evaluate_consistency.py.")
+                    help="Save poses, depth, confidence and images to this .npz for "
+                         "scripts_context/evaluate_consistency.py and export_dense_cloud.py.")
+    p.add_argument("--save_ds", type=int, default=2,
+                    help="Downsampling of the saved .npz: 2 = half resolution (light, "
+                         "enough to evaluate), 1 = full 518x518 per-pixel depth (needed "
+                         "for the dense point cloud, ~4x the file size).")
     p.add_argument("--no_serve", action="store_true",
                     help="Skip viewer.run() at the end (which never returns by "
                          "design, keeping the process alive to serve the viser "
@@ -99,12 +124,15 @@ def main():
         image_size=518, patch_size=14,
         rotate_clockwise_90=args.rotate_clockwise_90,
     )
+    if args.preprocess_mode == "pad":
+        from lingbot_map.utils.load_fn import load_and_preprocess_images
+        images = load_and_preprocess_images(paths, mode="pad", image_size=518, patch_size=14)
     print(f"Loaded {images.shape[0]} images in {time.time()-t0:.1f}s "
-          f"({images.shape[-1]}x{images.shape[-2]})", flush=True)
+          f"({images.shape[-1]}x{images.shape[-2]}, {args.preprocess_mode})", flush=True)
 
     model_args = argparse.Namespace(
         model_path=args.model_path, image_size=518, patch_size=14,
-        mode="streaming", enable_3d_rope=True, max_frame_num=1024,
+        mode=args.mode, enable_3d_rope=True, max_frame_num=1024,
         num_scale_frames=args.num_scale_frames, kv_cache_sliding_window=args.kv_cache_sliding_window,
         camera_num_iterations=args.camera_num_iterations, use_sdpa=args.use_sdpa, compile=False,
     )
@@ -122,7 +150,7 @@ def main():
     if not args.keep_images_on_cpu:
         images = images.to(device)
     num_frames = images.shape[0]
-    keyframe_interval = 1 if num_frames <= 320 else (num_frames + 319) // 320
+    keyframe_interval = args.keyframe_interval or (1 if num_frames <= 320 else (num_frames + 319) // 320)
     print(f"num_frames={num_frames} keyframe_interval={keyframe_interval} "
           f"dtype={dtype}", flush=True)
 
@@ -133,11 +161,21 @@ def main():
 
     t0 = time.time()
     with torch.no_grad(), torch.amp.autocast("cuda", dtype=dtype):
-        predictions = model.inference_streaming(
-            images, num_scale_frames=args.num_scale_frames,
-            keyframe_interval=keyframe_interval,
-            output_device=output_device,
-        )
+        if args.mode == "windowed":
+            # Same call demo.py makes in windowed mode.
+            predictions = model.inference_windowed(
+                images, window_size=args.window_size,
+                overlap_keyframes=args.overlap_keyframes,
+                num_scale_frames=args.num_scale_frames,
+                keyframe_interval=keyframe_interval,
+                output_device=output_device,
+            )
+        else:
+            predictions = model.inference_streaming(
+                images, num_scale_frames=args.num_scale_frames,
+                keyframe_interval=keyframe_interval,
+                output_device=output_device,
+            )
     print(f"Inference done in {time.time()-t0:.1f}s "
           f"({(time.time()-t0)/num_frames:.2f}s/frame)", flush=True)
 
@@ -169,7 +207,7 @@ def main():
         source_index = np.array([e.get("source_index", -1) for e in entries])
 
     if args.save_predictions:
-        ds = 2
+        ds = max(1, args.save_ds)
         np.savez(
             args.save_predictions,
             depth=vis_dict["depth"][:, ::ds, ::ds, 0].astype(np.float16),
@@ -201,13 +239,15 @@ def main():
     )
 
     # --- Export GLB (same code path as the "Export GLB" GUI button) ---
-    os.makedirs(os.path.dirname(os.path.abspath(args.glb_out)) or ".", exist_ok=True)
-    viewer.glb_output_path.value = args.glb_out
-    viewer._export_glb()
-    print(f"GLB export status: {viewer.glb_status.value}", flush=True)
+    if args.glb_out:
+        os.makedirs(os.path.dirname(os.path.abspath(args.glb_out)) or ".", exist_ok=True)
+        viewer.glb_output_path.value = args.glb_out
+        viewer._export_glb()
+        print(f"GLB export status: {viewer.glb_status.value}", flush=True)
 
     # --- Quick static preview (no GL/EGL context needed) ---
     try:
+        assert args.preview_png, 'preview omitido'
         import numpy as np
         import matplotlib
         matplotlib.use("Agg")
@@ -257,6 +297,8 @@ def main():
         fig.savefig(args.preview_png, dpi=150)
         plt.close(fig)
         print(f"Preview PNG saved to {args.preview_png}", flush=True)
+    except AssertionError:
+        pass
     except Exception as e:
         print(f"Preview render failed (non-fatal): {e}", flush=True)
 
