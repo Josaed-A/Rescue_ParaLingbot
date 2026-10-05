@@ -26,23 +26,45 @@ python3 scripts_stream/live_server.py --port 8090
 Después, en la página, panel **"Mapeo en vivo"**: elegir fuente, `Iniciar`. El mapa
 crece frame a frame mientras se navega (órbita o primera persona, con mouse o control).
 
-## Las tres fuentes
+## Las fuentes
 
 | Fuente | Para qué | Campo `path` |
 |---|---|---|
 | **Carpeta de frames** | repetir una prueba ya grabada como si llegara en vivo — es la forma reproducible de probar el streaming | carpeta con `000000.png`... |
-| **Webcam** | cámara real de este equipo | se elige en un desplegable: `/api/live/devices` lista los `/dev/videoN` y **prueba cuál entrega imagen** (varios nodos existen pero no sirven) |
+| **Cámara en vivo (webcam o celular)** | cámara real: una webcam de este equipo o la cámara de un teléfono Android conectado por adb | se elige en un desplegable: `/api/live/devices` lista los `/dev/videoN` (y **prueba cuál entrega imagen**: varios nodos existen pero no sirven) y, en `remote`, una entrada por cámara de cada teléfono que aparece en `adb devices` |
+| **Cámara IP (URL)** | apps tipo IP Webcam, cámaras RTSP, streams MJPEG | `rtsp://...` o `http://...` (lo que abra `cv2.VideoCapture`) |
 | **Archivo de video** | un `.mp4` reproducido frame a frame | ruta al video |
 
+### Cámara de un celular (`android_camera.py`)
+
+No hace falta instalar nada en el teléfono (Android 12 o más nuevo, con depuración por adb,
+por USB o por Wi-Fi). Usa el `scrcpy-server` del repo hermano `cel-en-rescue`
+(`datos/scrcpy/scrcpy-server`, o el que indique `SCRCPY_SERVER`):
+
+1. lo sube al teléfono con un nombre propio (`/data/local/tmp/lingbot-scrcpy-server.jar`, así no pisa el de scrcpy);
+2. lo arranca en modo cámara con `raw_stream=true` y abre un túnel `adb forward`;
+3. ffmpeg decodifica el H.264 a frames BGR, y un hilo se queda siempre con el último (el modelo va a ~2 frames/s y la cámara a 15).
+
+Al terminar la sesión cierra ffmpeg, el servidor del teléfono y el túnel; no quedan procesos.
+
+- **adb:** usa el de `ADB`, el del sistema o el portable de `cel-en-rescue/datos/platform-tools`. Conviene que sea el mismo binario que ya tiene el servidor adb corriendo: uno de otra versión lo reinicia y corta otras sesiones (por ejemplo un scrcpy abierto en otra terminal). Nunca hace `adb kill-server`.
+- **La cámara la usa una sola app a la vez.** Si hay un scrcpy de cámara abierto, hay que cerrarlo antes.
+- **Rotación:** el teléfono entrega la imagen en la orientación del sensor, que es horizontal, sin importar cómo se lo sostenga. El modelo necesita la imagen derecha (gravedad hacia abajo): con el **celular vertical, 90°**; horizontal, 0°. El panel pone 90° al elegir un teléfono. No se puede leer la orientación del teléfono por adb de forma confiable (con la pantalla apagada Android reporta siempre rotación 0), así que se elige a mano.
+- **Resolución:** 1280x720 a 15 fps y 4 Mbit/s por defecto (el modelo recorta a 518 de ancho igual). 1920x1080 pide más Wi-Fi sin ganar detalle en el mapa.
+- `info.json` de la sesión guarda modelo del teléfono, cámara, rotación y resolución, con la categoría "celular", pero **no el serial ni la IP**.
+
+Probar la cámara suelta, sin el modelo: `python3 scripts_stream/android_camera.py [serial] [cámara]`
+(escribe `cel_prueba.jpg`).
+
 Parámetros del panel: `fps` (0 = tan rápido como pueda el modelo), `máx. frames`
-(0 = sin límite), `puntos/frame` (cuántos puntos se mandan al navegador por frame) y
+(0 = sin límite; cuenta frames leídos de la fuente, antes del analizador de contexto), `puntos/frame` (cuántos puntos se mandan al navegador por frame) y
 `conf. (percentil)` (descarta el X% de píxeles menos confiables).
 
 ## Rendimiento medido en esta máquina (RTX 2000 Ada, 8 GB)
 
 | | |
 |---|---|
-| Velocidad | **2.1-2.4 frames/s** repitiendo frames de 1080x1920; **3.9 frames/s** con la webcam (640x480) |
+| Velocidad | **2.1-2.4 frames/s** repitiendo frames de 1080x1920; **3.9 frames/s** con la webcam (640x480); **1.7-2.2 frames/s** con la cámara de un celular por Wi-Fi (1280x720, analizador de contexto activado) |
 | VRAM en marcha | 5.4-6.2 GB (dentro del presupuesto de 8 GB) |
 | VRAM al detener | vuelve a ~170 MB (solo el contexto CUDA) |
 | Carga del modelo | ~8 s, una sola vez por sesión |
@@ -58,6 +80,15 @@ dos ocupa la pantalla: video grande con el render en la esquina, o al revés.
 Va en el mismo canal binario, marcado con `frame_idx = 0xFFFFFFFF` (un índice que
 ningún frame real usa), así no hizo falta cambiar el protocolo de los puntos. Se puede
 apagar con `"preview": false` en el POST de arranque.
+
+### Fluidez: el video va a su propio ritmo
+
+Con una cámara en vivo (webcam, celular o URL), la vista del video **no** espera al modelo:
+un hilo manda el último frame de la cámara a `preview_fps` (15) y 640 px de ancho. Si el
+navegador no alcanza, el servidor descarta imágenes en vez de encolarlas. En el mapa, una
+pirámide magenta marca la cámara actual y se desliza hacia cada pose nueva; con **"seguir la
+cámara"** (activado por defecto) la vista la acompaña desde atrás y arriba. Arrastrar la vista
+lo desactiva. El mapa en sí crece al ritmo del modelo (~2 frames/s).
 
 ## Guardar y reconstruir una sesión en vivo
 
@@ -109,7 +140,10 @@ caminar despacio, o capturar con `capture_frames.py` y reproducir la carpeta des
   `context_step_px` (36 px por defecto), envía el más nítido del tramo;
 - con **sintetizar frames intermedios** (`"context_synth": true`), en saltos grandes
   genera frames intermedios por flujo bidireccional. Entran al modelo **solo como
-  contexto** (caché KV): no se dibujan ni se graban.
+  contexto** (caché KV): no se dibujan ni se graban. El selector x1/x2/x3
+  (`"context_synth_strength"`) baja el umbral y agrega más intermedios por salto. En vivo,
+  x2 y x3 empeoran mucho el recorrido porque la caché se llena de frames inventados
+  (bitácora del 2026-10-04, tarde). Por defecto, x1.
 
 Con el analizador el ritmo lo pone el movimiento de la cámara, no el campo `fps`. Las
 estadísticas (enviados / leídos / sintéticos) aparecen en el panel y en el `info.json` de
@@ -128,6 +162,11 @@ Dos límites del modelo que no se veían con sesiones cortas (encontrados el 202
   caché, el modelo conserva sus tokens de cámara, registro y escala y los concatena para
   siempre: la VRAM crecía 1.1 MB por frame. El servidor los recorta a los de los últimos
   64 frames desalojados (`special_keep`) y el crecimiento baja a 0.25 MB por frame.
+- **Caché de la cabeza de cámara que crece sin límite.** Guarda un token de pose por frame
+  y el desalojo del modelo solo actúa con más de un token por frame: 0.25 MB por frame, que
+  cortaba las sesiones de ~1900 pasadas. El servidor deja los frames de escala más los
+  últimos 1024 (`camera_keep`); las sesiones más cortas no cambian. Con los dos recortes la
+  VRAM queda plana (medido, 400 frames).
 - **Tabla de posiciones de 1024 frames.** La posición temporal del RoPE 3D está
   precalculada para `max_frame_num` frames (1024 en `demo.py`). Pasado ese número, la parte
   temporal de la codificación queda vacía. El servidor construye el modelo con 16384.

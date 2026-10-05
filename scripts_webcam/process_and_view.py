@@ -105,6 +105,8 @@ def main():
                     help="Downsampling of the saved .npz: 2 = half resolution (light, "
                          "enough to evaluate), 1 = full 518x518 per-pixel depth (needed "
                          "for the dense point cloud, ~4x the file size).")
+    p.add_argument("--images_fp16", action="store_true",
+                   help="guardar las imágenes de entrada en float16 (la mitad de RAM; el modelo corre en bf16 igual)")
     p.add_argument("--no_serve", action="store_true",
                     help="Skip viewer.run() at the end (which never returns by "
                          "design, keeping the process alive to serve the viser "
@@ -127,6 +129,8 @@ def main():
     if args.preprocess_mode == "pad":
         from lingbot_map.utils.load_fn import load_and_preprocess_images
         images = load_and_preprocess_images(paths, mode="pad", image_size=518, patch_size=14)
+    if args.images_fp16:
+        images = images.half()
     print(f"Loaded {images.shape[0]} images in {time.time()-t0:.1f}s "
           f"({images.shape[-1]}x{images.shape[-2]}, {args.preprocess_mode})", flush=True)
 
@@ -218,6 +222,8 @@ def main():
             ds=ds, is_real=is_real, source_index=source_index,
         )
         print(f"Predictions saved to {args.save_predictions}", flush=True)
+        if args.no_serve and not args.glb_out and not args.preview_png:
+            return                       # nada más que hacer: no armar el visor (pide mucha RAM)
 
     if not is_real.all():
         # Synthetic frames only served as temporal context: keep their invented

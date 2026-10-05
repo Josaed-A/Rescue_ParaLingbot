@@ -353,6 +353,8 @@ $$
 
 con muestreo bilineal (`cv2.remap`). La versión fuera de línea agrega máscaras de oclusión por consistencia ida-vuelta: un píxel es poco confiable si $\|\mathbf F_{01}(\mathbf u)+\mathbf F_{10}(\mathbf u+\mathbf F_{01}(\mathbf u))\|$ es grande.
 
+**Intensidad** $k$ (`synth_strength`): se sintetiza en todo salto mayor que $1.5\,\delta/k$ y se pone un intermedio cada $\delta/k$, es decir, $n=\min\big(8,\lceil kA/\delta\rceil-1\big)$. Con $k=1$ es la regla de arriba. Medido el 2026-10-04: $k=2$ y $k=3$ no mejoran la forma del recorrido en windowed y la empeoran mucho en streaming (bitácora).
+
 Los frames sintéticos entran al modelo **solo como contexto temporal** (pose y caché KV). Nunca se dibujan ni se agregan a ningún mapa.
 
 ---

@@ -146,6 +146,11 @@
   #live .row { display: flex; gap: 6px; margin-top: 8px; }
   #live .row button { flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #33383f;
         background: #1b1e24; color: #e6e8eb; cursor: pointer; font-size: 12px; font-weight: 600; }
+  #live .devrow { display: flex; gap: 6px; align-items: center; margin-top: 5px; }
+  #live .devrow select { margin: 0; flex: 1; min-width: 0; width: auto; }
+  #live .devrow button { flex: 0 0 34px; padding: 6px 0; border-radius: 6px; border: 1px solid #33383f;
+                         background: #1b1e24; color: #e6e8eb; cursor: pointer; }
+  #live .devrow label { flex: 0 0 auto; font-size: 11px; color: #9aa3ad; }
   #live #live-start { background: #16a34a; border-color: #16a34a; color: #fff; }
   #live #live-stop { background: #b91c1c; border-color: #b91c1c; color: #fff; }
   #live #live-start:disabled, #live #live-stop:disabled { opacity: 0.4; cursor: default; }
@@ -153,6 +158,7 @@
   #live .stat span:first-child { color: #9aa3ad; }
   #live .ctx { margin-top: 7px; font-size: 11px; color: #c9ced4; display: flex; flex-direction: column; gap: 3px; }
   #live .ctx label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  #live .ctx select { width: auto; margin: 0 0 0 auto; padding: 1px 4px; }
   #live-msg { margin-top: 7px; font-size: 11px; color: #9aa3ad; min-height: 15px; }
 
   /* Vista del video real. Por defecto es la ventanita; con .full pasa a ocupar
@@ -230,10 +236,28 @@
   <h2>Mapeo en vivo <span id="live-dot" class="dot"></span></h2>
   <select id="live-source">
     <option value="folder">Carpeta de frames (repetir una prueba)</option>
-    <option value="webcam">Webcam en vivo (/dev/video0)</option>
+    <option value="webcam">Cámara en vivo (webcam o celular)</option>
+    <option value="url">Cámara IP (URL rtsp:// o http://)</option>
     <option value="video">Archivo de video</option>
   </select>
-  <select id="live-device" style="display:none"></select>
+  <div id="live-device-row" class="devrow" style="display:none">
+    <select id="live-device" style="flex:1"></select>
+    <button id="live-device-refresh" title="volver a buscar cámaras (webcams y teléfonos por adb)">↻</button>
+  </div>
+  <div id="live-rot-row" class="devrow" style="display:none">
+    <label for="live-rot" style="margin:0">rotación</label>
+    <select id="live-rot" title="el modelo necesita la imagen derecha (gravedad hacia abajo)">
+      <option value="0">0° (celular horizontal)</option>
+      <option value="90">90° (celular vertical)</option>
+      <option value="180">180°</option>
+      <option value="270">270°</option>
+    </select>
+    <select id="live-camres" title="resolución que pide al teléfono (más alta = más Wi-Fi)">
+      <option value="1280x720">1280x720</option>
+      <option value="1920x1080">1920x1080</option>
+      <option value="960x540">960x540</option>
+    </select>
+  </div>
   <input id="live-path" type="text" placeholder="ruta de la carpeta o del video"
          value="captures/pruebas_reales/unisabana/prueba_2/variantes/full_time_s1/frames">
   <div class="grid">
@@ -250,7 +274,11 @@
     <label title="Salta frames casi iguales al anterior y elige el más nítido de cada tramo (flujo óptico DIS). Ignora el fps: el ritmo lo pone el movimiento de la cámara.">
       <input type="checkbox" id="live-ctx" checked> analizador de contexto</label>
     <label title="En saltos grandes genera frames intermedios por flujo óptico; entran al modelo solo como contexto, no se dibujan ni se graban.">
-      <input type="checkbox" id="live-synth"> sintetizar frames intermedios</label>
+      <input type="checkbox" id="live-synth"> sintetizar frames intermedios
+      <select id="live-synth-strength" title="Intensidad del amortiguador: x1 solo en saltos grandes; x2 y x3 en casi todos los saltos y con más intermedios">
+        <option value="1">x1</option><option value="2">x2</option><option value="3">x3</option></select></label>
+    <label title="La vista acompaña a la cámara (en tercera persona, desde atrás y arriba), con movimiento suave entre poses. Se desactiva solo al arrastrar la vista.">
+      <input type="checkbox" id="live-follow" checked> seguir la cámara</label>
   </div>
   <div class="stat"><span>frames</span><span id="live-frames">0</span></div>
   <div class="stat" id="live-ctx-row" style="display:none"><span>contexto</span><span id="live-ctx-stat">—</span></div>

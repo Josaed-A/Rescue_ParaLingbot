@@ -665,6 +665,7 @@ document.getElementById("flip-v").addEventListener("change", (e) => {
   if (g && lastBox) frameScene(normalizeGroup(g, lastBox, lastDown));
 });
 document.getElementById("show-cams").addEventListener("change", (e) => {
+  if (live.marker && live.framed) live.marker.visible = e.target.checked;
   if (loadedGroup) {
     loadedGroup.children.forEach((c) => { if (c.isGroup) c.visible = e.target.checked; });
   }
@@ -681,6 +682,10 @@ const live = {
   ws: null, group: null, pos: null, col: null, geo: null, points: null,
   count: 0, frames: 0, path: [], pathGeo: null, pathLine: null, framed: false, sticky: false,
   down: new THREE.Vector3(0, 0, 0),
+  // cámara actual, suavizada: el modelo entrega una pose cada ~0.5 s y el marcador y la
+  // vista se deslizan hacia ella en cada cuadro, en vez de saltar
+  marker: null, tgtPos: new THREE.Vector3(), tgtQuat: new THREE.Quaternion(), hasPose: false,
+  follow: true,
 };
 
 function liveEnsureScene() {
@@ -708,12 +713,25 @@ function liveEnsureScene() {
   live.pathLine = new THREE.Line(live.pathGeo, new THREE.LineBasicMaterial({ vertexColors: true }));
   live.pathLine.frustumCulled = false;
   live.group.add(live.pathLine);
+
+  // marcador de la cámara actual: pirámide (mira a +Z, convención OpenCV) con un "techo"
+  // para distinguir arriba de abajo. Tamaño unitario: se escala al encuadrar.
+  const v = [0, 0, 0], a = [-0.6, -0.45, 1], b = [0.6, -0.45, 1], c = [0.6, 0.45, 1], d = [-0.6, 0.45, 1];
+  const segs = [v, a, v, b, v, c, v, d, a, b, b, c, c, d, d, a, a, [0, -0.8, 1], [0, -0.8, 1], b];
+  const mg = new THREE.BufferGeometry();
+  mg.setAttribute("position", new THREE.Float32BufferAttribute(segs.flat(), 3));
+  live.marker = new THREE.LineSegments(mg, new THREE.LineBasicMaterial({ color: 0xff3df0, depthTest: false }));
+  live.marker.renderOrder = 10;
+  live.marker.visible = false;
+  live.group.add(live.marker);
   scene.add(live.group);
 }
 
 function liveReset() {
   if (!live.group) return;
   live.count = 0; live.frames = 0; live.path = []; live.framed = false; live.sticky = false;
+  live.hasPose = false; live.marker.visible = false;
+  live.follow = document.getElementById("live-follow").checked;
   live.down.set(0, 0, 0);
   live.geo.setDrawRange(0, 0);
   live.pathGeo.setDrawRange(0, 0);
@@ -723,14 +741,22 @@ function liveReset() {
 // Vista del video real que entra al modelo. Llega como mensaje binario con
 // frame_idx = 0xFFFFFFFF (ningún frame real usa ese índice).
 const PREVIEW_TAG = 0xFFFFFFFF;
-let camViewUrl = null;
+let camViewUrl = null, camViewBusy = false, camViewPending = null;
 function liveOnPreview(buf) {
+  // Llega a ~15 fps. Si la imagen anterior todavía se está decodificando, se guarda
+  // solo la más nueva: nunca se arma una cola (que es lo que hace que se vea atrasado).
+  if (camViewBusy) { camViewPending = buf; return; }
   const view = document.getElementById("cam-view");
   view.style.display = view.classList.contains("full") ? "flex" : "block";
   const blob = new Blob([new Uint8Array(buf, 4)], { type: "image/jpeg" });
   const url = URL.createObjectURL(blob);
   const img = document.getElementById("cam-view-img");
-  img.onload = () => { if (camViewUrl) URL.revokeObjectURL(camViewUrl); camViewUrl = url; };
+  camViewBusy = true;
+  img.onload = img.onerror = () => {
+    if (camViewUrl) URL.revokeObjectURL(camViewUrl);
+    camViewUrl = url; camViewBusy = false;
+    if (camViewPending) { const b = camViewPending; camViewPending = null; liveOnPreview(b); }
+  };
   img.src = url;
 }
 
@@ -772,6 +798,13 @@ function liveOnFrame(buf) {
   // y la columna 1 (elementos 1, 5, 9) es el eje Y de la cámara = "abajo"
   live.down.add(new THREE.Vector3(c2w[1], c2w[5], c2w[9]));
   const p = new THREE.Vector3(c2w[3], c2w[7], c2w[11]);
+  const rot = new THREE.Matrix4().set(c2w[0], c2w[1], c2w[2], 0, c2w[4], c2w[5], c2w[6], 0,
+                                      c2w[8], c2w[9], c2w[10], 0, 0, 0, 0, 1);
+  live.tgtPos.copy(p); live.tgtQuat.setFromRotationMatrix(rot);
+  if (!live.hasPose) {               // la primera pose se toma directa, sin deslizar
+    live.hasPose = true;
+    live.marker.position.copy(p); live.marker.quaternion.copy(live.tgtQuat);
+  }
   live.path.push(p);
   const k = live.path.length - 1;
   if (k < 20000) {
@@ -797,8 +830,43 @@ function liveOnFrame(buf) {
     lastDown = live.down.clone().normalize();
     frameScene(normalizeGroup(live.group, lastBox, lastDown));
     live.points.material.size = parseFloat(document.getElementById("point-size").value);
+    // tamaño del marcador: 4% de la diagonal de lo que había al encuadrar
+    const diag = lastBox.getSize(new THREE.Vector3()).length();
+    live.marker.scale.setScalar(Math.max(diag * 0.04, 1e-4));
+    live.marker.visible = document.getElementById("show-cams").checked;
   }
 }
+
+// Se llama en cada cuadro: desliza el marcador hacia la última pose y, si "seguir la
+// cámara" está activo, lleva la vista detrás y arriba de él. Con amortiguación
+// exponencial, así el resultado no depende de los fps del navegador.
+const _fw = new THREE.Vector3(), _wp = new THREE.Vector3(), _want = new THREE.Vector3();
+function liveSmooth(dt) {
+  if (!live.marker || !live.hasPose) return;
+  const k = 1 - Math.exp(-dt * 5);
+  live.marker.position.lerp(live.tgtPos, k);
+  live.marker.quaternion.slerp(live.tgtQuat, k);
+  if (!live.follow || !live.framed || !live.running || fps.active) return;
+  live.marker.updateMatrixWorld();
+  live.marker.getWorldPosition(_wp);
+  live.marker.getWorldDirection(_fw);          // eje +Z del marcador = hacia donde mira
+  _fw.y = 0;
+  if (_fw.lengthSq() < 1e-6) _fw.set(0, 0, 1);
+  _fw.normalize();
+  const dist = CANON_DIAG * 0.22;
+  _want.copy(_wp).addScaledVector(_fw, -dist).add(new THREE.Vector3(0, dist * 0.55, 0));
+  const kc = 1 - Math.exp(-dt * 2.5);
+  camera.position.lerp(_want, kc);
+  orbit.target.lerp(_wp.addScaledVector(_fw, dist * 0.3), kc);
+}
+// arrastrar la vista toma el control: se deja de seguir hasta volver a marcar la casilla
+orbit.addEventListener("start", () => {
+  if (live.running && live.follow) {
+    live.follow = false;
+    document.getElementById("live-follow").checked = false;
+  }
+});
+document.getElementById("live-follow").addEventListener("change", (e) => { live.follow = e.target.checked; });
 
 function liveSetRunning(on) {
   live.running = on;
@@ -859,7 +927,8 @@ document.getElementById("live-start").onclick = async () => {
   liveReset(); liveEnsureScene();
   const body = {
     source: document.getElementById("live-source").value,
-    device: parseInt(document.getElementById("live-device").value || "0"),
+    device: 0,
+    rotation: parseInt(document.getElementById("live-rot").value || "0"),
     path: document.getElementById("live-path").value.trim(),
     fps: parseFloat(document.getElementById("live-fps").value),
     max_frames: parseInt(document.getElementById("live-max").value) || 0,
@@ -867,7 +936,20 @@ document.getElementById("live-start").onclick = async () => {
     conf_percentile: parseFloat(document.getElementById("live-conf").value),
     context: document.getElementById("live-ctx").checked,
     context_synth: document.getElementById("live-ctx").checked && document.getElementById("live-synth").checked,
+    context_synth_strength: parseFloat(document.getElementById("live-synth-strength").value),
   };
+  if (body.source === "webcam") {
+    // la lista mezcla webcams locales y cámaras de teléfonos conectados por adb
+    const opt = document.getElementById("live-device").selectedOptions[0];
+    const d = opt && opt.dataset.dev ? JSON.parse(opt.dataset.dev) : { kind: "webcam", index: 0 };
+    if (d.kind === "android") {
+      Object.assign(body, { source: "android", serial: d.serial, camera_id: d.camera_id,
+                            device_label: d.model || d.label,
+                            cam_size: document.getElementById("live-camres").value });
+    } else {
+      body.device = d.index;
+    }
+  }
   if (body.context) body.fps = 0;      // con el analizador, el ritmo lo decide el movimiento
   document.getElementById("live-msg").textContent = "iniciando...";
   try {
@@ -887,28 +969,57 @@ document.getElementById("live-stop").onclick = async () => {
 async function loadDevices() {
   const sel = document.getElementById("live-device");
   sel.innerHTML = "";
+  const msg = document.createElement("option");
+  msg.textContent = "buscando cámaras (webcams y teléfonos por adb)..."; msg.disabled = true;
+  sel.appendChild(msg);
   try {
     const r = await fetch("/api/live/devices");
-    const { devices } = await r.json();
-    const usable = devices.filter((d) => d.usable);
-    for (const d of (usable.length ? usable : devices)) {
-      const o = document.createElement("option");
-      o.value = d.index;
-      o.textContent = d.label + (d.usable ? "" : " — no entrega imagen");
-      o.disabled = !d.usable;
-      sel.appendChild(o);
-    }
-    if (!devices.length) {
-      const o = document.createElement("option");
-      o.textContent = "no se detectó ninguna cámara"; o.disabled = true;
-      sel.appendChild(o);
-    }
-  } catch (e) { /* sin servidor */ }
+    const { devices = [], remote = [] } = await r.json();
+    sel.innerHTML = "";
+    const add = (group, list, empty) => {
+      const g = document.createElement("optgroup"); g.label = group;
+      const usable = list.filter((d) => d.usable);
+      for (const d of (usable.length ? usable : list)) {
+        const o = document.createElement("option");
+        o.textContent = d.label + (d.usable ? "" : " — no entrega imagen");
+        o.disabled = !d.usable;
+        o.dataset.dev = JSON.stringify(d);
+        g.appendChild(o);
+      }
+      if (!list.length) {
+        const o = document.createElement("option"); o.textContent = empty; o.disabled = true; g.appendChild(o);
+      }
+      sel.appendChild(g);
+    };
+    add("Cámaras remotas (celular por adb)", remote, "ningún teléfono conectado por adb");
+    add("Webcams de este equipo", devices, "ninguna webcam");
+    const first = [...sel.options].find((o) => !o.disabled);
+    if (first) first.selected = true;
+    liveDeviceChanged();
+  } catch (e) {
+    sel.innerHTML = "<option disabled>sin servidor</option>";
+  }
 }
+function liveDeviceChanged() {
+  const opt = document.getElementById("live-device").selectedOptions[0];
+  const d = opt && opt.dataset.dev ? JSON.parse(opt.dataset.dev) : {};
+  document.getElementById("live-camres").style.display = d.kind === "android" ? "" : "none";
+  // la cámara del teléfono llega en la orientación del sensor (horizontal): sostenido en
+  // vertical hay que girarla 90°, porque el modelo necesita la gravedad hacia abajo
+  const rot = document.getElementById("live-rot");
+  if (!rot.dataset.touched) rot.value = d.kind === "android" ? "90" : "0";
+}
+document.getElementById("live-rot").onchange = (e) => { e.target.dataset.touched = "1"; };
+document.getElementById("live-device").onchange = liveDeviceChanged;
+document.getElementById("live-device-refresh").onclick = loadDevices;
 document.getElementById("live-source").onchange = (e) => {
-  const cam = e.target.value === "webcam";
-  document.getElementById("live-path").style.display = cam ? "none" : "";
-  document.getElementById("live-device").style.display = cam ? "" : "none";
+  const v = e.target.value, cam = v === "webcam";
+  const path = document.getElementById("live-path");
+  path.style.display = cam ? "none" : "";
+  path.placeholder = v === "url" ? "rtsp://... o http://.../video" : "ruta de la carpeta o del video";
+  if (v === "url" && !/^(rtsp|https?):/.test(path.value)) path.value = "";
+  document.getElementById("live-device-row").style.display = cam ? "flex" : "none";
+  document.getElementById("live-rot-row").style.display = (cam || v === "url") ? "flex" : "none";
   if (cam) loadDevices();
 };
 document.getElementById("cam-view-swap").onclick = camViewSwap;
@@ -933,8 +1044,10 @@ function animate() {
     applyFpsLook();   // orientar primero: fpsMove toma los ejes de la cámara ya orientada
     fpsMove(dt);
   } else {
+    liveSmooth(dt);
     orbit.update();
   }
+  if (fps.active) liveSmooth(dt);
   renderer.render(scene, camera);
 
   fpsAccum += dt; fpsFrames++;

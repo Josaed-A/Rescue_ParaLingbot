@@ -35,17 +35,19 @@ def main():
     ap.add_argument("--stride", type=int, default=1)
     ap.add_argument("--context", action="store_true")
     ap.add_argument("--synth", action="store_true")
+    ap.add_argument("--synth_strength", type=float, default=1.0)
     ap.add_argument("--step_px", type=float, default=36.0)
     ap.add_argument("--max_frames", type=int, default=0)
     ap.add_argument("--special_keep", type=int, default=64, help="0 = comportamiento original (crece sin límite)")
     ap.add_argument("--keyframe_interval", type=int, default=1)
+    ap.add_argument("--camera_keep", type=int, default=1024, help="0 = la caché de la cabeza de cámara crece sin límite")
     a = ap.parse_args()
     cfg = {"source": a.source, "path": a.path, "device": 0, "fps": None, "max_frames": a.max_frames,
            "points_per_frame": 2000, "conf_percentile": 30.0, "preview": False,
            "num_scale_frames": 2, "kv_cache_sliding_window": 16, "camera_num_iterations": 4,
            "model_path": a.model_path, "record": True, "captures_dir": a.captures_dir,
-           "context": a.context, "context_synth": a.synth, "context_step_px": a.step_px, "stride": a.stride,
-           "special_keep": a.special_keep, "keyframe_interval": a.keyframe_interval}
+           "context": a.context, "context_synth": a.synth, "context_step_px": a.step_px, "context_synth_strength": a.synth_strength, "stride": a.stride,
+           "special_keep": a.special_keep, "camera_keep": a.camera_keep, "keyframe_interval": a.keyframe_interval}
     msgs = {"n": 0, "last": -100, "vram_max": 0}
 
     def broadcast(obj):

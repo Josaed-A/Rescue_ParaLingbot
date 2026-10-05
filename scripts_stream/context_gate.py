@@ -9,8 +9,9 @@ Decide, frame a frame y sin mirar el futuro, qué le llega al modelo:
     iguales al anterior son redundantes y se saltan), eligiendo el más nítido del tramo, o
     cuando ya se saltaron max_skip frames seguidos;
   - con synth=True, si entre el último frame enviado y el nuevo hay un salto grande (más de
-    synth_factor x step_px, y menos de flow_max_px, donde la interpolación se desarma), se
-    generan frames intermedios por flujo bidireccional (aproximación de Super-SloMo). Esos
+    synth_factor x step_px / synth_strength, y menos de flow_max_px, donde la interpolación se
+    desarma), se generan intermedios cada step_px / synth_strength (hasta max_synth por salto),
+    por flujo bidireccional (aproximación de Super-SloMo). Esos
     frames entran al modelo solo como contexto temporal: no se dibujan ni se graban.
 
 El mismo objeto sirve fuera de línea (replay_live.py) para medir su efecto.
@@ -23,12 +24,17 @@ import numpy as np
 
 class ContextGate:
     def __init__(self, step_px=36.0, blur_rel=0.5, max_skip=6, synth=False, synth_factor=1.5,
-                 flow_max_px=240.0, work=256):
+                 flow_max_px=240.0, work=256, synth_strength=1.0, max_synth=8):
         self.step = step_px
         self.blur_rel = blur_rel
         self.max_skip = max_skip
         self.synth = synth
-        self.synth_factor = synth_factor
+        # intensidad del amortiguador: x1 sintetiza en saltos > 1.5 pasos, un intermedio por paso;
+        # xS baja el umbral y el espaciado de los intermedios S veces
+        self.synth_strength = max(1.0, float(synth_strength))
+        self.synth_factor = synth_factor / self.synth_strength
+        self.synth_step = step_px / self.synth_strength
+        self.max_synth = max_synth
         self.flow_max = flow_max_px
         self.work = work
         self.dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
@@ -90,7 +96,7 @@ class ContextGate:
     def _send(self, rgb, motion):
         out = []
         if self.synth and self.last_sent is not None and self.synth_factor * self.step < motion <= self.flow_max:
-            n = int(math.ceil(motion / self.step)) - 1
+            n = min(self.max_synth, int(math.ceil(motion / self.synth_step)) - 1)
             out += [(im, True) for im in interpolate(self.last_sent, rgb, n, self.work)]
             self.stats["synth"] += len(out)
         out.append((rgb, False))
@@ -149,11 +155,13 @@ def main():
     ap.add_argument("--step_px", type=float, default=36.0)
     ap.add_argument("--max_skip", type=int, default=6)
     ap.add_argument("--synth", action="store_true")
+    ap.add_argument("--synth_strength", type=float, default=1.0,
+                    help="intensidad del amortiguador (1 = umbral 1.5 pasos y un intermedio por paso; 2, 3 = más)")
     a = ap.parse_args()
     files = sorted(f for f in os.listdir(a.frames_dir) if f.lower().endswith((".png", ".jpg", ".jpeg")))
     od = os.path.join(a.out_dir, "frames")
     os.makedirs(od, exist_ok=True)
-    g = ContextGate(step_px=a.step_px, max_skip=a.max_skip, synth=a.synth)
+    g = ContextGate(step_px=a.step_px, max_skip=a.max_skip, synth=a.synth, synth_strength=a.synth_strength)
     entries, k, recent = [], 0, {}
     for si, f in enumerate(files):
         full = cv2.cvtColor(cv2.imread(os.path.join(a.frames_dir, f)), cv2.COLOR_BGR2RGB)

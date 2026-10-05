@@ -90,7 +90,7 @@ Los pasos 5 y 6 también se hacen desde el visor: cada prueba tiene **⚙ constr
 que corre `build_maps.py` en segundo plano.
 
 El mismo servidor hace **mapeo en vivo**: en el panel "Mapeo en vivo" se elige la fuente
-(carpeta de frames, webcam o video) y el mapa se construye frame a frame en la pantalla,
+(carpeta de frames, webcam, la cámara de un celular Android conectado por adb, una cámara IP o un video) y el mapa se construye frame a frame en la pantalla,
 navegable mientras crece. El modelo se carga sólo al iniciar la sesión. **Al terminar, la
 sesión queda guardada** como prueba "sin guardar" (mismo formato que el resto): se le pone
 nombre, zona y categorías, y se le construyen los mapas, incluido el reproceso en
@@ -139,6 +139,7 @@ Los flags de memoria son los validados para 8 GB de VRAM; `tools/doctor.py` indi
 | `scripts_context/build_maps.py`, `tsdf_mesh.py`, `gsplat_train.py` | Construcción de mapas por prueba: nubes, malla TSDF, Gaussian Splatting, video |
 | `scripts_context/geo_filter.py` | Filtro geométrico previo a la malla y al splat: SegFormer, consistencia multivista, planos, esquinas, malla estructural |
 | `scripts_stream/` | Servidor único del visor + mapeo en vivo por WebSocket + guardado de sesiones y trabajos de construcción |
+| `scripts_stream/android_camera.py` | Cámara de un celular Android por adb (scrcpy-server de `cel-en-rescue` + ffmpeg) como fuente del mapeo en vivo |
 | `scripts_stream/context_gate.py` | Analizador de contexto (movimiento, nitidez, frames intermedios) para el vivo y para videos |
 | `scripts_webcam/` | Captura con webcam y `process_and_view.py` (mapeo, streaming o windowed, export `.glb` y `.npz`) |
 | `scripts_gpu/` | Chequeo previo de GPU, lanzador que bloquea la suspensión, arreglo de suspensión del driver, baseline de VRAM |
@@ -232,6 +233,18 @@ RGB camera → LingBot-Map → depth + pose estimados → point cloud, tratando 
 - **Sesiones largas en vivo:** se encontraron y acotaron dos límites que las rompían, la VRAM que crecía sin límite y la tabla de 1024 posiciones del RoPE 3D.
 
 Ver la sección del 2026-10-04 al final de la bitácora.
+
+**Actualización 2026-10-04, tarde (más reciente): amortiguador visual más fuerte.**
+
+- **Más intermedios no ayudan.** Interpolar más frames por flujo óptico (intensidad x2 y x3: hasta 2.8 sintéticos por frame real) no mejora la forma del recorrido en windowed (pasillos: 5.56% → 5.22-7.18%; fablab: 1.86% → 2.30-2.77%) y la empeora mucho en vivo (fablab: 4.29% → 21.75-24.24%). La caché de 16 frames se llena de frames inventados. Se deja x1 por defecto.
+- **Herramienta nueva:** `scripts_context/windowed_lean.py` corre windowed con ~2900 frames en 10 GB de RAM.
+- **Otro límite del vivo, acotado:** la caché de la cabeza de cámara crecía 0.25 MB por frame y cortaba las sesiones de ~1900 pasadas.
+
+Ver la sección "Amortiguador visual más fuerte" al final de la bitácora.
+
+**Actualización 2026-10-04, noche (más reciente): cámara del celular en el mapeo en vivo.** La cámara de un teléfono Android conectado por adb (con el `scrcpy-server` de `cel-en-rescue`, sin instalar nada en el teléfono) es ahora una fuente del mapeo en vivo, elegible en el panel junto a las webcams; también hay una fuente de cámara IP por URL. Funciona a 1.7-2.2 frames/s. El teléfono entrega siempre la imagen horizontal: con el celular en vertical hay que girarla 90° (el panel lo pone por defecto). Ver la sección "Cámara de un celular como fuente del mapeo en vivo" al final de la bitácora.
+
+**Continuación (más reciente): vista del vivo más fluida.** El video de referencia ya no espera al modelo: sale de la cámara a ~13-15 imágenes/s (antes ~2), y un marcador de la cámara actual con "seguir la cámara" hace que la vista acompañe al teléfono sin saltos. Una GUI nativa local no transmitiría mejor: el WebSocket no es el cuello, el modelo sí (~2 frames/s). Ver la sección "Vista del mapeo en vivo más fluida" al final de la bitácora.
 
 **Pendiente de decisión del usuario:** implementar el driver de captura de webcam en vivo (análisis ya hecho, nada implementado todavía), decidir si mitigar el techo de VRAM de la GPU antes de ese experimento (dado que a ~4 FPS el mismo OOM se alcanzaría en ~9 segundos de captura continua), continuar la campaña secuencial en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o recién ahí empezar la integración/optimización con Paragraphica.
 
@@ -1701,7 +1714,7 @@ Validar la hipótesis del punto 1 no requiere grabar nada: una secuencia landsca
 
 ## Guía de ejecución de este repositorio (comandos que funcionan en esta máquina) — 2026-09-15
 
-**Por qué existe esta sección:** los comandos del README original (`Robbyant/lingbot-map`) no funcionan copiados tal cual en esta máquina. Tres motivos, todos vistos en la práctica: usan rutas *placeholder* (`/path/to/lingbot-map.pt`); la GPU de 8GB no alcanza con la configuración por defecto; y hay problemas de entorno propios de este equipo (suspensión, procesos colgados). Todos los comandos se corren desde la raíz del repo: `cd ~/Rescue_ParaLingbot`.
+**Por qué existe esta sección:** los comandos del README original (`Robbyant/lingbot-map`) no funcionan copiados tal cual en esta máquina. Tres motivos, todos vistos en la práctica: usan rutas *placeholder* (`/path/to/lingbot-map.pt`); la GPU de 8GB no alcanza con la configuración por defecto; y hay problemas de entorno propios de este equipo (suspensión, procesos colgados). Todos los comandos se corren desde la raíz del repo: `cd ~/Rescue/Rescue_ParaLingbot`.
 
 ### Archivos que tienen que existir
 
@@ -1856,7 +1869,7 @@ Verificado después: `pip check` sin conflictos de paquetes del repo; `cv2.Video
 ### Qué ataba el repo a esta máquina
 
 1. **Versiones sin fijar:** `pyproject.toml` no fija nada y numpy 1.26.4 se sostenía a mano (ya se había roto una vez al instalar Kaolin).
-2. **Link `.pth` con ruta absoluta** a `/home/semillero/Rescue_ParaLingbot`: se rompe al mover o clonar el repo en otra carpeta.
+2. **Link `.pth` con ruta absoluta** a `/home/semillero/Rescue/Rescue_ParaLingbot`: se rompe al mover o clonar el repo en otra carpeta.
 3. **Extensiones `.so` compiladas** para Python 3.10 + torch 2.12 + CUDA 13 de este equipo, y Kaolin compilado desde un commit concreto (`d52da9f`, **no** el tag `v0.18.0`).
 4. **Modelos (4.8 GB) fuera de git**, con el throttling de Hugging Face ya documentado.
 5. **Herramientas fuera del repo:** CUDA toolkit en `~/cuda-13.0`, ffmpeg en `~/.local/bin`.
@@ -2833,6 +2846,203 @@ Verificado en el visor con Chromium sin GPU: la estructura de la escalera carga 
 - La estructura asume paredes verticales, casi todas a 90° y planas a lo largo del tramo. En espacios no Manhattan conserva solo las paredes oblicuas grandes, y si el recorrido tiene deriva residual (pasillos largos) las paredes se curvan y no se detectan.
 - La consistencia multivista necesita revisitas. En pasillos, sin vueltas al mismo lugar, hay 1.3 vecinos lejanos por frame y la violación de espacio libre casi no actúa (0.06% de los píxeles).
 - No hay generación de imagen por IA en ningún paso.
+
+## Amortiguador visual más fuerte: más frames intermedios por flujo óptico no mejoran la coherencia del mapa (2026-10-04, tarde)
+
+**Pedido del usuario:** aumentar el amortiguamiento visual que hacen los frames intermedios interpolados por flujo óptico durante el mapeo (los que entran al modelo solo como contexto), hacerlo más fuerte y ver si ayuda a mantener la coherencia con el mapa.
+
+### Qué se cambió
+
+**Intensidad del amortiguador** (`scripts_stream/context_gate.py`, `--synth_strength` / `synth_strength`). Con intensidad $k$, se sintetiza en todo salto mayor que $1.5\,\delta/k$ y se pone un intermedio cada $\delta/k$ de movimiento, con $\delta = 36$ px y como máximo 8 por salto. Con $k=1$ es lo de la mañana. La matemática de la interpolación no cambia (`MATEMATICA.md` §7.4): solo hay más instantes $t$ y en más saltos.
+
+| Frames que ve el modelo | x1 | x2 | x3 |
+|---|---|---|---|
+| Pasillos (762 reales) | +88 sintéticos | +1189 | +2114 |
+| Fablab (374 reales) | +1 | +293 | +604 |
+
+También está en el vivo: selector x1/x2/x3 al lado de "sintetizar frames intermedios" en el panel, y `context_synth_strength` en el POST.
+
+**Para poder medirlo hicieron falta dos cosas:**
+
+1. **`scripts_context/windowed_lean.py`** (nuevo). Con unos 2000 frames, `process_and_view.py --mode windowed` murió por RAM durante la inferencia (16 GB, el tope del cgroup): el modelo acumula en CPU la profundidad y la confianza de todos los frames en float32 a resolución completa. El ejecutor nuevo hace exactamente el mismo algoritmo, llamando a los mismos métodos del modelo (frames de escala, keyframes cada `keyframe_interval`, caché limpia por ventana y `_align_and_stitch_windows`), pero:
+   - lee las imágenes de disco ventana por ventana;
+   - guarda profundidad y confianza a media resolución y en float16;
+   - escribe en el npz solo los frames reales.
+
+   RAM pico de 10 GB (casi toda la carga del modelo) con 2876 frames. **Validado** contra `process_and_view.py` en el fablab con x1: mismo error de forma (1.86% contra 1.86%), poses a menos de 0.022 y profundidad a 0.6% en promedio. En pasillos con x1 da 5.56%, el mismo valor de la mañana.
+2. **`process_and_view.py --images_fp16`** guarda las imágenes de entrada en float16 (el modelo corre en bf16 de todos modos). Además, con `--no_serve` y sin GLB ni vista previa, ahora termina apenas guarda las predicciones en vez de armar el visor, que era lo que agotaba la RAM después de guardar. Error de forma en el fablab con x1: 1.88% contra 1.86% en float32.
+
+### Resultados: windowed (ventana 16), contra el croquis
+
+Al subir la cantidad de frames, el `keyframe_interval` automático también sube. Por eso se midieron dos variantes:
+
+- **kf auto:** el modelo elige $\lceil N/320\rceil$, así la ventana sigue cubriendo un tiempo parecido del recorrido;
+- **kf fijo:** el mismo de x1 (3 en pasillos, 2 en el fablab), que aísla el efecto de la síntesis.
+
+| Error de forma | x1 | x2, kf auto | x2, kf fijo | x3, kf auto | x3, kf fijo | Recomendada (cadencia uniforme, sin síntesis) |
+|---|---|---|---|---|---|---|
+| Pasillos | 5.56% | 5.84% (kf 7) | 5.22% | 6.41% (kf 9) | 7.18% | **4.75%** |
+| Fablab | **1.86%** | 2.48% (kf 3) | 2.77% | 2.30% (kf 4) | 2.71% | 2.47% |
+
+Fablab: x1 con `windowed_lean.py`, el resto con `process_and_view.py --images_fp16`. Pasillos: todo con `windowed_lean.py`. Los dos caminos dan lo mismo (validación de arriba).
+
+| Rectitud (croquis: 0.781 / 0.876) | x1 | x2 auto | x2 fijo | x3 auto | x3 fijo |
+|---|---|---|---|---|---|
+| Pasillos | 0.513 | 0.456 | 0.545 | 0.524 | 0.452 |
+| Fablab | 0.815 | 0.808 | 0.823 | 0.812 | 0.813 |
+
+### Resultados: en vivo (streaming), contra el croquis
+
+Analizador activado, reproduciendo todos los frames de cada video con el mismo código del servidor (`replay_live.py`):
+
+| Error de forma | Analizador sin síntesis (mañana) | x1 (mañana) | x2 | x3 |
+|---|---|---|---|---|
+| Pasillos | 9.40% | 11.86% | 20.71%\* | — |
+| Fablab | 4.18% | 4.29% | 21.75% | 24.24% |
+| Frames reales por segundo | 1.5-1.6 | 1.4-1.5 | 0.67-0.90 | 0.64 |
+
+\* La sesión se cortó por falta de VRAM tras unas 1880 pasadas (736 de los ~764 frames reales). Ver abajo.
+
+### Otro límite del vivo, encontrado en esta medición: la caché de la cabeza de cámara
+
+Después del recorte de la mañana, la VRAM del vivo seguía creciendo unos 0.25 MB por frame, lo que alcanza para llenar los 8 GB en unas 1900 pasadas (unos 20 minutos de sesión a 1.6 frames/s, o menos con síntesis). Midiendo cada caché del modelo cada 120 frames, el crecimiento estaba entero en la **caché KV de la cabeza de cámara**: 15.2 MB más de claves y 15.2 MB más de valores cada 120 frames. La cabeza de cámara guarda un token de pose por frame, y el desalojo por ventana deslizante del modelo solo actúa cuando hay más de un token por frame (`attention.py`, `shape[3] > 1`). Por eso esa caché nunca se recorta.
+
+El servidor ahora la acota sin tocar `lingbot_map`: se quedan los frames de escala más los últimos `camera_keep` (1024 por defecto, unos 256 MB como máximo). Verificado con una sesión de 400 frames y `camera_keep=100`, para forzar el recorte:
+
+- la VRAM queda plana (6259-6260 MB, contra +75 MB sin recortar);
+- las poses son idénticas hasta el frame 100 y después difieren en promedio un 0.2% del largo del recorrido respecto de la sesión sin recortar.
+
+Con 1024, las sesiones de menos de 1024 pasadas no cambian en nada.
+
+### Lectura
+
+1. **Más amortiguamiento no mejora la coherencia con el mapa.**
+   - En el fablab, todas las intensidades mayores que x1 empeoran (2.30% a 2.77% contra 1.86%).
+   - En pasillos, x3 es lo peor de la tabla (6.41% y 7.18%). La única mejora sobre x1 es x2 con keyframe fijo (5.22% contra 5.56%), y queda igual peor que la configuración recomendada sin analizador ni síntesis (4.75%). Con una corrida por variante y el ruido de ±0.2-0.3 entre conjuntos de frames, no alcanza para cambiar nada.
+2. **En vivo es claramente dañino.** En streaming la caché tiene 16 frames: con x2 o x3 la mayoría de esos lugares los ocupan frames inventados, que cubren mucho menos recorrido real que 16 frames reales. La trayectoria se encoge y se enrolla (`live_strength/m2_x2/ruta.png`). Además, el vivo baja de 1.5 a 0.6-0.9 frames por segundo.
+
+   Marcar los sintéticos como no-keyframes (que consulten la caché sin quedarse) tampoco sirve: así no influyen en los frames siguientes, que es justo lo que se buscaba.
+3. **Es consistente con lo medido el 2026-09-19 y el 2026-09-28.** El modelo indexa el tiempo por posición en la secuencia (RoPE 3D). Meter más frames entre dos reales estira el "tiempo" que ve el modelo sin agregar información nueva de la escena: un intermedio por flujo óptico es, por construcción, una mezcla de los dos frames reales vecinos.
+4. **Queda como estaba:** x1 por defecto en el panel y en el CLI, y la síntesis apagada en vivo. La intensidad queda disponible para quien quiera probarla en otros videos.
+
+### Archivos
+
+- **Nuevo:** `scripts_context/windowed_lean.py`.
+- **Recorte de la caché de la cabeza de cámara** en `live_server.py` (`camera_keep`, también en `replay_live.py --camera_keep`).
+- **Cambiados:**
+  - `scripts_stream/context_gate.py` (`synth_strength`, `max_synth`);
+  - `scripts_stream/live_server.py` y `replay_live.py` (`context_synth_strength`);
+  - `scripts_webcam/process_and_view.py` (`--images_fp16`, salida temprana);
+  - visor (selector de intensidad).
+- Las corridas quedaron en la carpeta temporal de la sesión, no en `captures/`.
+
+### Limitaciones
+
+- Dos muestras, una corrida por variante.
+- La interpolación es la versión simple de Super-SloMo, sin red de refinamiento. Una interpolación mejor (RIFE, FILM) daría intermedios más limpios, pero seguiría sin agregar información de la escena, y el problema de fondo (la ventana cubre menos recorrido real) no cambia.
+
+## Cámara de un celular como fuente del mapeo en vivo, y cámaras remotas en el panel (2026-10-04, noche)
+
+**Pedido del usuario:** lanzar una prueba de mapeo con la cámara del celular, con ayuda del repo hermano `cel-en-rescue` (que ya conecta el teléfono por adb), y agregar las cámaras remotas como dispositivos seleccionables en la interfaz. Sin commits.
+
+### Cómo llega la imagen del teléfono (`scripts_stream/android_camera.py`, nuevo)
+
+No se instaló nada en el teléfono. Se usa el `scrcpy-server` 4.1 que ya trae `cel-en-rescue` (`datos/scrcpy/`), arrancado directamente con `app_process` en modo cámara:
+
+1. se sube con un nombre propio (`/data/local/tmp/lingbot-scrcpy-server.jar`), para no pisar el de scrcpy;
+2. se arranca con `video_source=camera`, `raw_stream=true`, `tunnel_forward=true`, sin audio ni control, y se abre un túnel `adb forward tcp:0 localabstract:scrcpy_<id>`;
+3. llega un H.264 Annex B crudo, que ffmpeg decodifica a BGR por tuberías. Un hilo se queda siempre con el último frame: la cámara va a 15 fps y el modelo a ~2.
+
+`list_cameras` pregunta al mismo servidor qué cámaras hay (`list_cameras=true`); el teléfono de la prueba tiene una trasera y una frontal, con 10-30 fps.
+
+**Tres detalles que costó encontrar:**
+
+- **ffmpeg no entregaba ningún frame con `-fflags nobuffer`.** El H.264 crudo no tiene marcas de tiempo, y con ese flag ffmpeg no emite nada. Con `-flags low_delay -probesize 32 -analyzeduration 0` sí: 74 frames en 5 s (15 fps) a 1280x720.
+- **El servidor tarda unos 3.3 s en abrir su socket,** y adb acepta la conexión antes y la cierra sin datos. Se reintenta hasta recibir los primeros bytes.
+- **Se respetan las reglas de `cel-en-rescue`:** se usa el mismo binario de adb que ya tiene el servidor corriendo (uno de otra versión lo reinicia y corta otras sesiones), nunca `adb kill-server`, y al cerrar se terminan ffmpeg y el servidor del teléfono y se quita el túnel. Verificado después de cada sesión: sin túneles, sin `app_process` en el teléfono ni ffmpeg en el equipo. La cámara la usaba un scrcpy de otra sesión; se cerró con la aprobación del usuario.
+
+### En el servidor y en el panel
+
+- `live_server.py`: fuentes nuevas `android` (con `serial`, `camera_id`, `rotation`, `cam_size`, `cam_fps`) y `url` (cámara IP: lo que abra `cv2.VideoCapture`, RTSP o MJPEG), y `rotation` para todas las cámaras en vivo. `/api/live/devices` devuelve, además de los `/dev/videoN`, una lista `remote` con una entrada por cámara de cada teléfono de `adb devices`.
+- Panel "Mapeo en vivo": la fuente "Cámara en vivo (webcam o celular)" muestra un desplegable con las cámaras remotas y las webcams agrupadas, un botón para volver a buscar, rotación y resolución pedida al teléfono. También hay una fuente "Cámara IP (URL)".
+- La sesión se guarda como siempre, con la categoría "celular". En `info.json` quedan el modelo del teléfono, la cámara, la rotación y la resolución, **sin el serial ni la IP**.
+
+### Orientación: el teléfono siempre entrega la imagen horizontal
+
+En la primera prueba (rotación 0) los frames llegaron acostados mientras el teléfono estaba en vertical (el piso a la derecha) y derechos cuando se puso horizontal. scrcpy entrega la orientación del sensor sin importar cómo se sostenga el teléfono, y el modelo necesita la gravedad hacia abajo (2026-09-17: con la imagen girada la confianza cae al mínimo). Con 90° (rotación horaria en ffmpeg) la imagen del teléfono vertical sale derecha.
+
+No se pudo leer la orientación por adb de forma confiable: con la pantalla apagada, `dumpsys display` reporta siempre rotación 0. Queda manual, con 90° por defecto al elegir un teléfono, porque en la mano se suele sostener en vertical.
+
+### Las dos sesiones de prueba
+
+| | Por la API (rotación 0) | Desde el panel (rotación 90°) |
+|---|---|---|
+| Frames leídos de la cámara / enviados al modelo | 200 / 54 (analizador de contexto) | 90 / 31 |
+| Movimiento mediano entre frames | 2.5 px (teléfono casi quieto) | — |
+| Velocidad | 2.16 frames/s | 1.67 frames/s |
+| VRAM | 4.7 GB | 6.2 GB |
+| Puntos en el mapa del navegador | — | 186 000 |
+| Carga de la fuente + el modelo | 3 s + 10 s | 3 s + 12 s |
+
+Las dos quedaron en `captures/streaming/sin_guardar/` y se ven en el explorador del visor. La segunda se lanzó con un navegador Chromium headless desde el panel: el desplegable listó las dos cámaras del teléfono y la webcam, puso 90° solo, el mapa creció en vivo y no hubo errores de JS.
+
+Son pruebas de que la fuente funciona, no de calidad del mapa: el teléfono estuvo casi quieto sobre un escritorio, y el modo en vivo sigue siendo streaming, que deriva (2026-09-30). Para un recorrido de verdad, lo que corresponde es caminar con el teléfono en vertical a 90° y después reprocesar la sesión guardada en windowed desde "construir mapas".
+
+`máx. frames` cuenta frames leídos de la fuente, antes del analizador, así que con una cámara a 15 fps 200 frames se gastan en unos 30 s. Para una sesión larga hay que ponerlo en 0.
+
+### Otro detalle
+
+El visor que estaba corriendo en el 8090 venía de una ruta vieja del repo que ya no existe (`~/Rescue_ParaLingbot`). Se reinició desde la ruta actual.
+
+### Limitaciones
+
+- Probado con un solo teléfono (Android 14), por Wi-Fi. Por USB debería andar igual, pero no se probó.
+- La fuente de cámara IP (URL) se agregó, pero no se probó con una cámara real; usa el mismo `cv2.VideoCapture` que la fuente de video.
+- La rotación se elige a mano; si se gira el teléfono a mitad de la sesión, la imagen queda acostada desde ahí.
+- La latencia de punta a punta (cámara → mapa) no se midió.
+
+## Vista del mapeo en vivo más fluida: el video va a su propio ritmo y la vista sigue a la cámara (2026-10-04, noche, continuación)
+
+**Pedido del usuario:** que la visualización del streaming sea mucho más fluida ("no se entiende nada de lo laggeado que es").
+
+### Por qué se veía a saltos
+
+- **El video de referencia se actualizaba al ritmo del modelo.** El servidor mandaba la imagen solo cuando el modelo terminaba un frame (~1.5-2 por segundo), y solo para los frames que dejaba pasar el analizador de contexto.
+- **La webcam entregaba imagen vieja.** Leída a 2 frames/s, se acumulan frames en el buffer de V4L2.
+- **ffmpeg soltaba a veces los frames del celular a ráfagas.** Llegaban frames separados por 1 ms y después huecos de hasta 2.2 s, mientras los bytes llegaban parejos por la red (hueco máximo en el socket: 0.3 s). Fue intermitente: en otra medición, todas las variantes de ffmpeg dieron 15 fps parejos.
+- **El mapa y la trayectoria solo se mueven cuando llega una pose,** cada ~0.5 s.
+
+### Qué se cambió
+
+1. **Vista del video a su propio ritmo** (`live_server.py`, `_preview_loop`). Con una cámara en vivo (webcam, celular o URL), un hilo manda el último frame de la cámara a `preview_fps` (15 por defecto, 640 px de ancho, JPEG 72), aparte del modelo. Si un cliente no terminó de recibir la imagen anterior, se descarta la nueva en vez de encolarla, y el navegador tampoco encola: si hay una imagen decodificándose, guarda solo la más nueva.
+2. **Webcam y URL con un hilo lector,** que se queda con el último frame. El modelo toma el más nuevo y la vista previa lo mira sin consumirlo (`FrameSource.latest()`, `AndroidCamera.latest()`).
+3. **ffmpeg con `-threads 1 -fps_mode passthrough`** para el celular. Con un solo hilo no retiene varios frames antes de soltarlos, y sin ajuste a un fps inventado no duplica ni descarta frames. En la medición, p95 de 101 ms contra 143 ms.
+4. **Marcador de la cámara actual y "seguir la cámara"** (`main.js`). Una pirámide magenta marca dónde está el teléfono y se desliza en cada cuadro hacia la última pose (amortiguación exponencial). Con "seguir la cámara" (activado por defecto), la vista se ubica detrás y arriba del marcador y lo acompaña sin saltos. Arrastrar la vista lo desactiva.
+
+### Medición, sesión real con el celular
+
+| | Antes | Después |
+|---|---|---|
+| Imágenes de la vista del video que salen del servidor | = frames del modelo (~1.5-2/s) | **13.4/s** (intervalo mediano 67 ms, p95 134 ms; la cámara da 15) |
+| Frames del modelo | ~1.9/s | ~1.9/s (sin cambio) |
+
+La salida del servidor se midió con un cliente WebSocket en Python. En el Chromium headless de prueba la vista llegó a 3.5 imágenes/s, porque ese navegador dibuja por software a 10 cuadros por segundo y tiene ocupado el hilo principal. Con un navegador con GPU ese límite no aplica, pero no se midió en uno.
+
+### ¿Una GUI nativa local (como el Tkinter de GARDIAN) transmitiría mejor?
+
+No. En este servidor, la parte del WebSocket no es la que limita:
+
+- **Celular → equipo:** 15 fps.
+- **Servidor → navegador por localhost:** 13.4 imágenes/s, unos 40 KB cada una.
+- **Modelo:** ~2 frames/s, igual en cualquier interfaz.
+
+Una GUI nativa solo se ahorraría codificar y decodificar el JPEG, que son milisegundos. El dashboard de GARDIAN usa Tkinter y pasa cada frame a PNG para mostrarlo, y el canvas de Tk dibuja en CPU: para una nube de cientos de miles a millones de puntos sería más lento que WebGL, que dibuja en la GPU. Una interfaz nativa con OpenGL (Open3D, Qt) andaría parecido al navegador, sin ganancia que justifique perder el explorador y el resto de la interfaz.
+
+### Limitaciones
+
+- La fluidez en un navegador con GPU no se midió; solo se midió lo que sale del servidor.
+- En una captura del navegador headless la vista del video apareció cortada en franjas de escenas distintas. Los frames guardados de esa misma sesión están limpios; no se pudo reproducir ni explicar.
+- El mapa sigue creciendo al ritmo del modelo (~2 frames/s). Eso no cambia con la interfaz.
 
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.

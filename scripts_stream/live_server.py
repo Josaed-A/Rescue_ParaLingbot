@@ -71,7 +71,8 @@ HEADER = struct.Struct("<II16f")
 class FrameSource:
     """Entrega frames BGR (numpy) uno por uno. Cierra con close()."""
 
-    def __init__(self, kind, path=None, device=0, fps=None, max_frames=0, start=0):
+    def __init__(self, kind, path=None, device=0, fps=None, max_frames=0, start=0,
+                 serial=None, camera_id="0", rotation=0, cam_size="1280x720", cam_fps=15):
         import cv2
         self.cv2 = cv2
         self.kind = kind
@@ -81,7 +82,20 @@ class FrameSource:
         self._cap = None
         self._files = None
         self._i = start
-        if kind == "webcam":
+        self._remote = None
+        self._rot = int(rotation or 0) % 360
+        if kind == "android":
+            # cámara de un teléfono por adb (scrcpy-server en el teléfono, H.264 → ffmpeg)
+            from android_camera import AndroidCamera
+            self._remote = AndroidCamera(serial, camera_id=str(camera_id), size=cam_size,
+                                         fps=int(cam_fps), rotation=self._rot)
+            self._rot = 0                       # ya lo rota ffmpeg
+        elif kind == "url":
+            # cámara IP / stream (RTSP, HTTP MJPEG, etc.)
+            self._cap = cv2.VideoCapture(path)
+            if not self._cap.isOpened():
+                raise RuntimeError(f"no se pudo abrir el stream {path}")
+        elif kind == "webcam":
             self._cap = cv2.VideoCapture(int(device), cv2.CAP_V4L2)
             if not self._cap.isOpened():
                 raise RuntimeError(f"no se pudo abrir la cámara {device}")
@@ -98,6 +112,46 @@ class FrameSource:
                 raise RuntimeError(f"la carpeta no tiene imágenes: {path}")
         else:
             raise ValueError(f"fuente desconocida: {kind}")
+        # Cámaras en vivo (webcam / URL): un hilo lee sin parar y se queda con el último
+        # frame. Sin esto, leyendo al ritmo del modelo (~2 frames/s) la webcam entrega frames
+        # viejos acumulados en su buffer, y la vista previa no puede ir más rápido que el modelo.
+        self._live = kind in ("webcam", "url")
+        if self._live:
+            self._cv = threading.Condition()
+            self._frame, self._fid, self._last = None, 0, 0
+            self._ended = False
+            self._grabber = threading.Thread(target=self._grab, daemon=True)
+            self._grabber.start()
+
+    @property
+    def is_live(self):
+        return self._live or self._remote is not None
+
+    def _grab(self):
+        while not self._ended:
+            ok, img = self._cap.read()
+            with self._cv:
+                if not ok:
+                    self._ended = True
+                else:
+                    self._frame, self._fid = img, self._fid + 1
+                self._cv.notify_all()
+
+    def _rotate(self, img):
+        if self._rot:
+            img = self.cv2.rotate(img, {90: self.cv2.ROTATE_90_CLOCKWISE, 180: self.cv2.ROTATE_180,
+                                        270: self.cv2.ROTATE_90_COUNTERCLOCKWISE}[self._rot])
+        return img
+
+    def latest(self):
+        """(id, frame BGR ya rotado) del último frame de una cámara en vivo, sin consumirlo."""
+        if self._remote is not None:
+            return self._remote.latest()
+        if not self._live:
+            return 0, None
+        with self._cv:
+            fid, img = self._fid, self._frame
+        return fid, (None if img is None else self._rotate(img))
 
     def total(self):
         if self._files is not None:
@@ -116,16 +170,32 @@ class FrameSource:
                 return None
             img = self.cv2.imread(self._files[self._i])
             self._i += 1
+        elif self._remote is not None:
+            img = self._remote.read()
+            if img is None:
+                return None
+        elif self._live:
+            with self._cv:      # el frame más reciente que todavía no se devolvió
+                self._cv.wait_for(lambda: self._fid > self._last or self._ended, 8.0)
+                if self._fid <= self._last:
+                    return None
+                self._last, img = self._fid, self._frame
         else:
             ok, img = self._cap.read()
             if not ok:
                 return None
+        img = self._rotate(img)
         self.n += 1
         return img
 
     def close(self):
+        if self._live:
+            self._ended = True
+            self._grabber.join(timeout=2)    # no soltar la cámara con un read() en curso
         if self._cap is not None:
             self._cap.release()
+        if self._remote is not None:
+            self._remote.close()
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +225,24 @@ class LiveSession:
     # -- utilidades ---------------------------------------------------------
     def _emit(self, obj):
         self.loop.call_soon_threadsafe(self.broadcast, obj)
+
+    def _preview_loop(self, src):
+        import cv2
+        period = 1.0 / max(1.0, float(self.cfg.get("preview_fps", 15)))
+        width = int(self.cfg.get("preview_width", 640))
+        last = 0
+        while not self.stop_flag.is_set() and self.state.get("running"):
+            t = time.time()
+            fid, img = src.latest()
+            if img is not None and fid != last:
+                last = fid
+                h, w = img.shape[:2]
+                if w > width:
+                    img = cv2.resize(img, (width, round(h * width / w)), interpolation=cv2.INTER_AREA)
+                ok, jpg = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 72])
+                if ok:
+                    self._emit({"__bin__": struct.pack("<I", 0xFFFFFFFF) + jpg.tobytes(), "__drop__": "preview"})
+            time.sleep(max(0.0, period - (time.time() - t)))
 
     def _status(self, msg=None, **kw):
         if msg:
@@ -212,17 +300,24 @@ class LiveSession:
         for k, im in enumerate(self.rec["images"]):
             cv2.imwrite(os.path.join(P, "frames", f"{k:06d}.png"), cv2.cvtColor(im, cv2.COLOR_RGB2BGR))
         src = self.cfg.get("source")
-        cats = ["streaming", "sin guardar"] + (["webcam"] if src == "webcam" else [])
+        cats = ["streaming", "sin guardar"] + {"webcam": ["webcam"], "android": ["celular"],
+                                               "url": ["cámara IP"]}.get(src, [])
         info = {
             "titulo": f"Sesión en vivo {time.strftime('%Y-%m-%d %H:%M', time.localtime(self.t_begin))}",
             "zona": "", "categorias": cats, "notas": "",
             "fecha": time.strftime("%Y-%m-%d", time.localtime(self.t_begin)),
             "modo": "streaming (en vivo): el mapa deriva; reprocesar con la tarea 'windowed'",
-            "fuente": {"tipo": src, "path": self.cfg.get("path"), "device": self.cfg.get("device")},
+            # sin serial ni IP del teléfono (no se guardan datos personales en las pruebas)
+            "fuente": ({"tipo": src, "camara": self.cfg.get("camera_id"), "modelo": self.cfg.get("device_label"),
+                        "rotacion": self.cfg.get("rotation", 0), "resolucion": self.cfg.get("cam_size")}
+                       if src == "android" else
+                       {"tipo": src, "path": None if src == "url" else self.cfg.get("path"),
+                        "device": self.cfg.get("device"), "rotacion": self.cfg.get("rotation", 0)}),
             "frames": n, "fps_objetivo": self.cfg.get("fps"), "fps_real": self.state.get("fps"),
             "parametros": {k: self.cfg[k] for k in ("num_scale_frames", "kv_cache_sliding_window",
                                                     "camera_num_iterations", "conf_percentile")},
             "analizador_contexto": ({"sintesis": self.cfg.get("context_synth"),
+                                     "intensidad_sintesis": self.cfg.get("context_synth_strength"),
                                      "paso_px": self.cfg.get("context_step_px"), **(self.state.get("context") or {})}
                                     if self.cfg.get("context") else None),
         }
@@ -263,8 +358,17 @@ class LiveSession:
         cfg = self.cfg
         self._status("abriendo la fuente de frames...")
         src = FrameSource(cfg["source"], path=cfg.get("path"), device=cfg.get("device", 0),
-                          fps=cfg.get("fps"), max_frames=cfg.get("max_frames", 0))
+                          fps=cfg.get("fps"), max_frames=cfg.get("max_frames", 0),
+                          serial=cfg.get("serial"), camera_id=cfg.get("camera_id", "0"),
+                          rotation=cfg.get("rotation", 0), cam_size=cfg.get("cam_size", "1280x720"),
+                          cam_fps=cfg.get("cam_fps", 15))
         self.state["total"] = src.total()
+        # Vista del video a su propio ritmo (no al del modelo): con una cámara en vivo,
+        # un hilo manda el último frame de la cámara a ~preview_fps; si el navegador no
+        # alcanza, el servidor descarta frames en vez de encolarlos (ver broadcast).
+        live_preview = src.is_live and cfg.get("preview", True)
+        if live_preview:
+            threading.Thread(target=self._preview_loop, args=(src,), daemon=True).start()
 
         self._status("cargando el modelo (sólo ahora se toca la GPU)...")
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -313,32 +417,37 @@ class LiveSession:
         if cfg.get("context"):
             from context_gate import ContextGate
             gate = ContextGate(step_px=cfg.get("context_step_px", 36.0), max_skip=cfg.get("context_max_skip", 6),
-                               synth=bool(cfg.get("context_synth")))
+                               synth=bool(cfg.get("context_synth")),
+                               synth_strength=float(cfg.get("context_synth_strength", 1.0)))
         self.state["context"] = None
         buf_synth = []
         n_real = [0]
 
         special_keep = int(cfg.get("special_keep", 64))
+        camera_keep = int(cfg.get("camera_keep", 1024))
 
         def bound_cache():
-            """Memoria acotada en sesiones largas. Cuando un frame sale de la ventana, el modelo
-            conserva sus tokens especiales (cámara, registro, escala) y los concatena para
-            siempre: ~3 MB de VRAM por frame, y una sesión de unos 550 frames llenaba los 8 GB.
-            Se dejan los de los últimos special_keep frames desalojados."""
-            if special_keep <= 0:
-                return
-            caches = []
-            kv = getattr(model.aggregator, "kv_cache", None)
-            if isinstance(kv, dict):
-                caches.append(kv)
-            ch = getattr(model.camera_head, "kv_cache", None)
-            if isinstance(ch, list):
-                caches += [c for c in ch if isinstance(c, dict)]
-            for c in caches:
-                for key, val in c.items():
-                    if key.endswith("_special") and torch.is_tensor(val) and val.dim() >= 3 \
-                            and val.shape[2] > special_keep:
-                        c[key] = val[:, :, -special_keep:].contiguous()
+            """Memoria acotada en sesiones largas. Dos cachés del modelo crecen sin límite:
+            - cuando un frame sale de la ventana, el agregador conserva sus tokens especiales
+              (cámara, registro, escala) para siempre: ~1.1 MB por frame;
+            - la cabeza de cámara guarda un token de pose por frame y nunca desaloja (el
+              desalojo del modelo solo actúa con más de un token por frame): ~0.25 MB por frame.
+            Se dejan los especiales de los últimos special_keep frames desalojados y, en la cabeza
+            de cámara, los frames de escala más los últimos camera_keep. Formato de las cachés:
+            [B, cabezas, frames, tokens, dim]."""
+            agg = getattr(model.aggregator, "kv_cache", None)
+            cam = getattr(model.camera_head, "kv_cache", None)
+            cam = [c for c in cam if isinstance(c, dict)] if isinstance(cam, list) else []
+            for c in ([agg] if isinstance(agg, dict) else []) + cam:
+                for key, val in list(c.items()):
+                    if not (torch.is_tensor(val) and val.dim() >= 3):
+                        continue
+                    if key.endswith("_special"):
+                        if 0 < special_keep < val.shape[2]:
+                            c[key] = val[:, :, -special_keep:].contiguous()
+                    elif c is not agg and key.startswith(("k_", "v_")) and 0 < camera_keep \
+                            and val.shape[2] > scale_n + camera_keep:
+                        c[key] = torch.cat([val[:, :, :scale_n], val[:, :, -camera_keep:]], dim=2).contiguous()
 
         kf_int = max(1, int(cfg.get("keyframe_interval", 1)))
         n_stream = [0]
@@ -391,7 +500,7 @@ class LiveSession:
             # Vista de referencia: el frame real que entró al modelo, en JPEG.
             # Se marca con frame_idx = 0xFFFFFFFF, que nunca usa un frame real,
             # así el cliente distingue los dos tipos sin romper el protocolo.
-            if cfg.get("preview", True) and not synth:
+            if cfg.get("preview", True) and not synth and not live_preview:
                 ok, jpg = cv2.imencode(".jpg", cv2.cvtColor(rgb_small, cv2.COLOR_RGB2BGR),
                                        [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 if ok:
@@ -573,9 +682,20 @@ def build_app(captures_dir, model_path):
     def broadcast(obj):
         """Se llama desde el loop; despacha a todos los WS conectados."""
         dead = []
+        drop = obj.get("__drop__")
+        busy = app["busy"]
         for ws in app["clients"]:
             try:
-                if "__bin__" in obj:
+                if drop:
+                    # mensajes descartables (vista previa): si el envío anterior a este
+                    # cliente no terminó, se salta este frame en vez de encolarlo
+                    key = (id(ws), drop)
+                    if key in busy:
+                        continue
+                    busy.add(key)
+                    t = asyncio.create_task(ws.send_bytes(obj["__bin__"]))
+                    t.add_done_callback(lambda _t, k=key: busy.discard(k))
+                elif "__bin__" in obj:
                     asyncio.create_task(ws.send_bytes(obj["__bin__"]))
                 else:
                     asyncio.create_task(ws.send_json(obj))
@@ -584,6 +704,7 @@ def build_app(captures_dir, model_path):
         for ws in dead:
             app["clients"].discard(ws)
 
+    app["busy"] = set()
     app["broadcast"] = broadcast
     app["jobs"] = JobRunner(broadcast)
 
@@ -625,8 +746,16 @@ def build_app(captures_dir, model_path):
             finally:
                 if cap is not None:
                     cap.release()
+            info["kind"] = "webcam"
             out.append(info)
-        return web.json_response({"devices": out})
+        # cámaras remotas: teléfonos conectados por adb (USB o Wi-Fi)
+        remote = []
+        try:
+            from android_camera import remote_devices
+            remote = await asyncio.get_running_loop().run_in_executor(None, remote_devices)
+        except Exception as e:
+            remote = [{"kind": "android", "usable": False, "label": f"adb no disponible: {e}"}]
+        return web.json_response({"devices": out, "remote": remote})
 
     async def live_status(req):
         s = req.app["state"]["session"]
@@ -644,11 +773,19 @@ def build_app(captures_dir, model_path):
             "source": body.get("source", "folder"),
             "path": body.get("path"),
             "device": body.get("device", 0),
+            "serial": body.get("serial"),
+            "camera_id": str(body.get("camera_id", "0")),
+            "device_label": body.get("device_label"),
+            "rotation": int(body.get("rotation", 0)),
+            "cam_size": body.get("cam_size", "1280x720"),
+            "cam_fps": int(body.get("cam_fps", 15)),
             "fps": float(body.get("fps", 4)) or None,
             "max_frames": int(body.get("max_frames", 0)),
             "points_per_frame": int(body.get("points_per_frame", 6000)),
             "conf_percentile": float(body.get("conf_percentile", 30)),
             "preview": bool(body.get("preview", True)),
+            "preview_fps": float(body.get("preview_fps", 15)),
+            "preview_width": int(body.get("preview_width", 640)),
             "num_scale_frames": int(body.get("num_scale_frames", 2)),
             "kv_cache_sliding_window": int(body.get("kv_cache_sliding_window", 16)),
             "camera_num_iterations": int(body.get("camera_num_iterations", 4)),
@@ -658,12 +795,16 @@ def build_app(captures_dir, model_path):
             "context": bool(body.get("context", False)),
             "context_synth": bool(body.get("context_synth", False)),
             "context_step_px": float(body.get("context_step_px", 36)),
+            "context_synth_strength": float(body.get("context_synth_strength", 1)),
             "stride": int(body.get("stride", 1)),
             "special_keep": int(body.get("special_keep", 64)),
+            "camera_keep": int(body.get("camera_keep", 1024)),
             "keyframe_interval": int(body.get("keyframe_interval", 1)),
         }
-        if cfg["source"] in ("folder", "video") and not cfg["path"]:
+        if cfg["source"] in ("folder", "video", "url") and not cfg["path"]:
             return web.json_response({"ok": False, "msg": "falta 'path'"}, status=400)
+        if cfg["source"] == "android" and not cfg["serial"]:
+            return web.json_response({"ok": False, "msg": "falta el teléfono ('serial')"}, status=400)
         sess = LiveSession(asyncio.get_running_loop(), req.app["broadcast"], cfg)
         req.app["state"]["session"] = sess
         sess.start()
