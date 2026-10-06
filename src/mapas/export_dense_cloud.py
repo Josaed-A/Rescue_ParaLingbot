@@ -13,7 +13,7 @@ times: without it the cloud is mostly duplicated points (heavy to load, no extra
 detail); with it, the detail is kept and the redundancy is not.
 
 Usage:
-  python3 scripts_context/export_dense_cloud.py run.npz --out_ply dense.ply \
+  python3 src/mapas/export_dense_cloud.py run.npz --out_ply dense.ply \
       [--voxel_rel 0.0015] [--conf_percentile 40] [--frame_stride 1] [--out_glb dense.glb]
 """
 import argparse

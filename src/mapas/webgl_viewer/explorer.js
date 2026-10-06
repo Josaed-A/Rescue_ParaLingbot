@@ -2,7 +2,7 @@
 // muestra sus mapas por tipo (un clic los carga), sus archivos, y permite editar
 // título / zona / categorías / notas, guardar o descartar sesiones en vivo y
 // construirles los mapas que les falten. Todo lo guarda el servidor en el info.json
-// de cada prueba (ver scripts_context/webgl_viewer/catalog.py).
+// de cada prueba (ver src/mapas/webgl_viewer/catalog.py).
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));

@@ -14,7 +14,7 @@ cámaras (raycasting) y compara esa profundidad con la que predijo el modelo. Si
 escala no son consistentes entre frames, la fusión promedia superficies desalineadas y esta
 coincidencia baja (paredes "dobles" o engrosadas).
 
-    python scripts_context/tsdf_mesh.py eval/mapa.npz --out exports/mapa_malla
+    python src/mapas/tsdf_mesh.py eval/mapa.npz --out exports/mapa_malla
       -> mapa_malla.ply (malla completa) + mapa_malla.glb (para el visor) + mapa_malla_info.json
 """
 import argparse

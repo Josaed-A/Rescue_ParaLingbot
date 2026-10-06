@@ -15,7 +15,7 @@ Evaluación honesta: 1 de cada --test_every frames reales queda fuera del entren
 se mide sobre esos frames (PSNR, SSIM y coincidencia de profundidad <5%), con la misma
 partición que usa tsdf_mesh.py --holdout_every, para comparar los dos métodos.
 
-    python scripts_context/gsplat_train.py eval/mapa.npz --out exports/splat/mapa_splat
+    python src/mapas/gsplat_train.py eval/mapa.npz --out exports/splat/mapa_splat
       -> mapa_splat.ply (formato 3DGS estándar, lo carga el visor), mapa_splat_info.json,
          mapa_splat_vistas.png (frames de prueba: real | splatting)
 

@@ -4,4 +4,4 @@ trimesh
 matplotlib
 onnxruntime
 requests
-aiohttp                 # servidor del visor WebGL (scripts_stream/live_server.py)
+aiohttp                 # servidor del visor WebGL (src/vivo/live_server.py)

@@ -1,6 +1,6 @@
 """Detailed single-run GPU/NVIDIA baseline for LingBot-Map.
 
-Unlike scripts_seq/run_single.py (which forced CPU to preserve the FP32 baseline
+Unlike src/secuencias/run_single.py (which forced CPU to preserve the FP32 baseline
 for the sequential-characterization campaign, see README.md), this script does
 NOT touch CUDA_VISIBLE_DEVICES -- it reuses demo.load_model()/demo.load_images()
 unmodified and replicates demo.py main()'s own device/dtype/aggregator-cast logic
@@ -12,7 +12,7 @@ camera_num_iterations=1, kv_cache_sliding_window=64, keyframe_interval=1 (since
 resolution changes of any kind.
 
 Monitors RAM+VRAM+GPU utilization/temp/power continuously via
-scripts_gpu/monitor_gpu.py, and timestamps every individual streaming-inference
+src/gpu/monitor_gpu.py, and timestamps every individual streaming-inference
 frame (via a tqdm.update() patch, restored afterward) so memory can be
 correlated to frame index, not just wall-clock time.
 """
@@ -26,11 +26,11 @@ import warnings
 
 import torch
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, REPO_ROOT)
 
 import demo  # noqa: E402  (repo's real production entrypoint, unmodified)
-from scripts_gpu.monitor_gpu import GPUMemoryMonitor  # noqa: E402
+from src.gpu.monitor_gpu import GPUMemoryMonitor  # noqa: E402
 
 
 def build_args(num_frames, sequence_dir, model_path):
@@ -72,7 +72,7 @@ def main():
 
     assert torch.cuda.is_available(), (
         "This is the GPU baseline script -- CUDA must be visible. "
-        "Use scripts_seq/run_single.py for the CPU-forced baseline."
+        "Use src/secuencias/run_single.py for the CPU-forced baseline."
     )
 
     warnings_captured = []

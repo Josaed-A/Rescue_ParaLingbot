@@ -8,7 +8,7 @@ and OOM status.
 
 Example:
     cd /home/clz/code/lingbot-map
-    python scripts/benchmark_gct_memory.py \
+    python src/diagnostico/benchmark_gct_memory.py \
         --height 384 --width 518 \
         --frame-counts 64 128 256 512 1024 2048 4096 10000 \
         --output gct_memory_h800_synthetic.csv \
@@ -38,7 +38,7 @@ import torch
 # Match demo.py allocator behavior unless the user has already set it.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 
@@ -90,7 +90,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--compile",
         action="store_true",
-        help="Compile hot modules as in gct_profile.py. Mostly useful for speed, not memory.",
+        help="Compile hot modules as in src/diagnostico/gct_profile.py. Mostly useful for speed, not memory.",
     )
     parser.add_argument("--warmup-frames", type=int, default=16)
     parser.add_argument(

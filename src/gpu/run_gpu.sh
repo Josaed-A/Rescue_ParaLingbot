@@ -3,7 +3,7 @@
 # sleep and lid-close suspend blocked for the command's whole lifetime
 # (systemd-inhibit, no sudo needed). Suspending while a CUDA process is alive
 # is what breaks nvidia_uvm on this laptop.
-# Usage: scripts_gpu/run_gpu.sh [--kill-stale] [--port N] -- python3 demo.py ...
+# Usage: src/gpu/run_gpu.sh [--kill-stale] [--port N] -- python3 demo.py ...
 # The viewer port is taken from the command's --port (demo.py default 8080).
 set -u
 

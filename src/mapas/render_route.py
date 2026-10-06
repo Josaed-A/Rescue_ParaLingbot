@@ -1,4 +1,4 @@
-"""Run demo_render/batch_demo.py's renderer on this machine's Kaolin build.
+"""Run src/upstream/demo_render/batch_demo.py's renderer on this machine's Kaolin build.
 
 Two problems stop the upstream renderer here, neither of them in the repo:
 
@@ -9,13 +9,13 @@ Two problems stop the upstream renderer here, neither of them in the repo:
    reimplemented here in torch and patched in before the renderer starts. The
    bit order matches Kaolin's own docstring example ([0,0,1]->1, [0,0,2]->8,
    [0,1,0]->2): z is the least significant axis, then y, then x.
-2. demo_render/demo.py::load_model loads the checkpoint straight onto the GPU and
+2. src/upstream/demo_render/demo.py::load_model loads the checkpoint straight onto the GPU and
    then moves the model there too (~9 GB, does not fit in 8 GB). So this wrapper
    is meant for --load_predictions, rendering predictions computed by
-   scripts_webcam/process_and_view.py (see scripts_context/npz_for_render.py).
+   src/captura/process_and_view.py (see src/mapas/npz_for_render.py).
 
 Usage (same flags as batch_demo.py):
-  python3 scripts_context/render_route.py --load_predictions in.npz --output_folder out/
+  python3 src/mapas/render_route.py --load_predictions in.npz --output_folder out/
 """
 import os
 import runpy
@@ -23,7 +23,7 @@ import sys
 
 import torch
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _spread_bits(v):
@@ -96,8 +96,8 @@ def self_test():
 if __name__ == "__main__":
     self_test()
     print("parche morton:", "aplicado" if patch_kaolin() else "no hacía falta", flush=True)
-    # batch_demo.py does `from demo import ...`, meaning demo_render/demo.py (not the
+    # batch_demo.py does `from demo import ...`, meaning src/upstream/demo_render/demo.py (not the
     # repo-root demo.py): running it by path skips the implicit sys.path[0], so set it.
-    sys.path.insert(0, os.path.join(ROOT, "demo_render"))
+    sys.path.insert(0, os.path.join(ROOT, "src/upstream/demo_render"))
     sys.argv = ["batch_demo.py"] + sys.argv[1:]
-    runpy.run_path(os.path.join(ROOT, "demo_render", "batch_demo.py"), run_name="__main__")
+    runpy.run_path(os.path.join(ROOT, "src/upstream/demo_render", "batch_demo.py"), run_name="__main__")

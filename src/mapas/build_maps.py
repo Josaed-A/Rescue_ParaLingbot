@@ -28,7 +28,7 @@ Cada tarea corre como proceso aparte (si una falla, las demás siguen) e imprime
 "### <tarea> (i/n)" al empezar y "### ok|falla <tarea> <s>s" al terminar, que el servidor
 del visor usa para mostrar el progreso.
 
-    python scripts_context/build_maps.py captures/pruebas_reales/unisabana/prueba_3 \
+    python src/mapas/build_maps.py captures/pruebas_reales/unisabana/prueba_3 \
         --npz eval/final_m2.npz --tasks nube,cruda,malla,splat
 """
 import argparse
@@ -39,7 +39,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
+REPO = os.path.dirname(os.path.dirname(HERE))
 TASKS = ["windowed", "filtro", "nube", "alta", "cruda", "malla", "malla_f", "splat", "splat_f", "video"]
 
 
@@ -116,7 +116,7 @@ def main():
                 if os.path.isfile(out) and not a.force:
                     print("ya existe", out)
                 else:
-                    rc = run([py, "scripts_webcam/process_and_view.py", "--image_folder", frames,
+                    rc = run([py, "src/captura/process_and_view.py", "--image_folder", frames,
                               "--model_path", "checkpoints/lingbot-map.pt", "--mode", "windowed",
                               "--window_size", str(a.window_size), "--use_sdpa", "--num_scale_frames", "2",
                               "--kv_cache_sliding_window", "16", "--camera_num_iterations", "4",
@@ -132,7 +132,7 @@ def main():
             if os.path.isfile(out + "_filtro.npz") and not a.force:
                 print("ya existe", out + "_filtro.npz")
             else:
-                rc = run([py, "scripts_context/geo_filter.py", npz, "--out", out], env=gpu_env())
+                rc = run([py, "src/mapas/geo_filter.py", npz, "--out", out], env=gpu_env())
         elif t in ("malla_f", "splat_f"):
             flt = os.path.join(ex, "estructura", name + "_filtro.npz")
             kind = "malla" if t == "malla_f" else "splat"
@@ -144,16 +144,16 @@ def main():
             elif os.path.isfile(done) and not a.force:
                 print("ya existe", done)
             elif kind == "malla":
-                rc = run([py, "scripts_context/tsdf_mesh.py", npz, "--out", out, "--filter", flt] + FILTER_ARGS)
+                rc = run([py, "src/mapas/tsdf_mesh.py", npz, "--out", out, "--filter", flt] + FILTER_ARGS)
             else:
-                rc = run([py, "scripts_context/gsplat_train.py", npz, "--out", out, "--iters", str(a.splat_iters),
+                rc = run([py, "src/mapas/gsplat_train.py", npz, "--out", out, "--iters", str(a.splat_iters),
                           "--filter", flt] + FILTER_ARGS, env=gpu_env())
         elif t == "nube":
             out = os.path.join(ex, name + "_denso.ply")
             if os.path.isfile(out) and not a.force:
                 print("ya existe", out)
             else:
-                rc = run([py, "scripts_context/export_dense_cloud.py", npz, "--out_ply", out, "--float32",
+                rc = run([py, "src/mapas/export_dense_cloud.py", npz, "--out_ply", out, "--float32",
                           "--voxel_rel", str(a.voxel_nube), "--conf_percentile", "35", "--chunk_frames", "20"])
         elif t == "alta":
             out = os.path.join(ex, "densidad_alta", name + "_denso_alta.ply")
@@ -161,14 +161,14 @@ def main():
             if os.path.isfile(out) and not a.force:
                 print("ya existe", out)
             else:
-                rc = run([py, "scripts_context/export_dense_cloud.py", npz, "--out_ply", out, "--float32",
+                rc = run([py, "src/mapas/export_dense_cloud.py", npz, "--out_ply", out, "--float32",
                           "--voxel_rel", str(a.voxel_alta), "--conf_percentile", "20", "--chunk_frames", "20"])
         elif t == "cruda":
             out = os.path.join(ex, "webgl", name + "_raw.ply")
             if os.path.isfile(out) and not a.force:
                 print("ya existe", out)
             else:
-                rc = run([py, "scripts_context/npz_to_webgl.py", npz, "--out_dir", os.path.join(ex, "webgl"),
+                rc = run([py, "src/mapas/npz_to_webgl.py", npz, "--out_dir", os.path.join(ex, "webgl"),
                           "--name", name, "--mode", "raw", "--max_points_per_frame", "8000"])
         elif t == "malla":
             out = os.path.join(ex, "malla", name + "_malla")
@@ -176,22 +176,22 @@ def main():
             if os.path.isfile(out + ".glb") and not a.force:
                 print("ya existe", out + ".glb")
             else:
-                rc = run([py, "scripts_context/tsdf_mesh.py", npz, "--out", out])
+                rc = run([py, "src/mapas/tsdf_mesh.py", npz, "--out", out])
         elif t == "splat":
             out = os.path.join(ex, "splat", name + "_splat")
             os.makedirs(os.path.dirname(out), exist_ok=True)
             if os.path.isfile(out + ".ply") and not a.force:
                 print("ya existe", out + ".ply")
             else:
-                rc = run([py, "scripts_context/gsplat_train.py", npz, "--out", out,
+                rc = run([py, "src/mapas/gsplat_train.py", npz, "--out", out,
                           "--iters", str(a.splat_iters)], env=gpu_env())
         elif t == "video":
             od = os.path.join(ex, "render_ruta_completa")
             os.makedirs(od, exist_ok=True)
             tmp = os.path.join(od, name + "_render_input.npz")
-            rc = run([py, "scripts_context/npz_for_render.py", npz, "--out", tmp])
+            rc = run([py, "src/mapas/npz_for_render.py", npz, "--out", tmp])
             if rc == 0:
-                rc = run([py, "scripts_context/render_route.py", "--load_predictions", tmp,
+                rc = run([py, "src/mapas/render_route.py", "--load_predictions", tmp,
                           "--output_folder", od, "--downsample_factor", "5"], env=gpu_env())
             if os.path.isfile(tmp):
                 os.remove(tmp)                   # intermedio grande y reproducible

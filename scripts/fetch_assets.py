@@ -12,10 +12,10 @@ Sources, tried in order:
 Downloads resume from <dest>.part. Standard library only: runs before any pip install.
 
 Usage:
-  python3 tools/fetch_assets.py                          # files for profiles core,vis
-  python3 tools/fetch_assets.py --profiles core,vis,render
-  python3 tools/fetch_assets.py --source-dir /media/usb/Rescue_ParaLingbot
-  python3 tools/fetch_assets.py --verify                 # check only, download nothing
+  python3 scripts/fetch_assets.py                          # files for profiles core,vis
+  python3 scripts/fetch_assets.py --profiles core,vis,render
+  python3 scripts/fetch_assets.py --source-dir /media/usb/Rescue_ParaLingbot
+  python3 scripts/fetch_assets.py --verify                 # check only, download nothing
 """
 import argparse
 import hashlib

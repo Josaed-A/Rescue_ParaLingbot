@@ -1,7 +1,7 @@
 """Índice de nubes exportadas bajo captures/, para el selector del visor.
 
 Se separó del servidor para que haya una sola implementación: la usa
-scripts_stream/live_server.py (el único servidor) y sirve para cualquier script
+src/vivo/live_server.py (el único servidor) y sirve para cualquier script
 que quiera listar qué pruebas hay exportadas.
 """
 import os

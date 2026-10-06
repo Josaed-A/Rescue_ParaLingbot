@@ -6,7 +6,7 @@ dist/
 build/
 *.so
 .eggs/
-demo_render/
+src/upstream/demo_render/
 .claude/
 .agents/
 skyseg.onnx
@@ -15,17 +15,16 @@ skyseg_batch.onnx
 weights/
 .DS_Store
 **/.DS_Store
-docs/
 .venv/
 *.pt
 *.safetensors
 checkpoints/
-results/
-results_gpu/
+registros/results/
+registros/results_gpu/
 captures/
 
 
-# descargas parciales / archivos rechazados de tools/fetch_assets.py
+# descargas parciales / archivos rechazados de scripts/fetch_assets.py
 *.part
 *.invalid
 
@@ -34,4 +33,7 @@ captures/
 
 # caches de Python de los scripts propios
 scripts_*/__pycache__/
-scripts_context/webgl_viewer/__pycache__/
+src/mapas/webgl_viewer/__pycache__/
+
+# logs del servidor del visor (nohup)
+logs/

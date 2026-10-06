@@ -1,15 +1,15 @@
 # Instalar este repositorio en otro equipo
 
-Guía para clonar y dejar funcionando `Rescue_ParaLingbot` en una máquina nueva, o para reparar el entorno en la actual. Todo sale de tres archivos versionados: [env/constraints.txt](env/constraints.txt) (versiones validadas juntas), [env/requirements/](env/requirements/) (qué instala cada perfil) y [env/assets.json](env/assets.json) (archivos de modelo con su SHA256).
+Guía para clonar y dejar funcionando `Rescue_ParaLingbot` en una máquina nueva, o para reparar el entorno en la actual. Todo sale de tres archivos versionados: [env/constraints.txt](../env/constraints.txt) (versiones validadas juntas), [env/requirements/](../env/requirements) (qué instala cada perfil) y [env/assets.json](../env/assets.json) (archivos de modelo con su SHA256).
 
 ## Qué viaja con git y qué no
 
 | Qué | ¿En git? | Cómo llega al equipo nuevo |
 |---|---|---|
-| Código, scripts, `env/`, `tools/` | Sí | `git clone` |
-| `checkpoints/lingbot-map.pt`, `skyseg.onnx`, `skyseg_batch.onnx` | No (4.8 GB) | `tools/fetch_assets.py`: los descarga o los copia de otra carpeta, verificando SHA256 |
-| Entorno Python (`.venv/`) | No | `setup_env.sh` lo crea |
-| Extensiones compiladas (`demo_render/render_cuda_ext/*.so`), Kaolin | No | `setup_env.sh --profiles render` las compila para ese equipo (dependen de su Python, torch y CUDA) |
+| Código, scripts, `env/`, `scripts/` | Sí | `git clone` |
+| `checkpoints/lingbot-map.pt`, `skyseg.onnx`, `skyseg_batch.onnx` | No (4.8 GB) | `scripts/fetch_assets.py`: los descarga o los copia de otra carpeta, verificando SHA256 |
+| Entorno Python (`.venv/`) | No | `scripts/setup_env.sh` lo crea |
+| Extensiones compiladas (`src/upstream/demo_render/render_cuda_ext/*.so`), Kaolin | No | `scripts/setup_env.sh --profiles render` las compila para ese equipo (dependen de su Python, torch y CUDA) |
 | Resultados (`captures/`) | No | Copiarlos a mano si hacen falta: `rsync -a equipo_viejo:Rescue_ParaLingbot/captures/ captures/` |
 | Driver NVIDIA, corrección de suspensión | No (es del sistema) | Una vez por equipo, ver abajo |
 
@@ -24,26 +24,26 @@ Guía para clonar y dejar funcionando `Rescue_ParaLingbot` en una máquina nueva
 ```bash
 git clone https://github.com/Josaed-A/Rescue_ParaLingbot.git
 cd Rescue_ParaLingbot
-./setup_env.sh                        # crea .venv con core,vis,gpu y baja los modelos
+scripts/setup_env.sh                        # crea .venv con core,vis,gpu y baja los modelos
 source .venv/bin/activate
-python tools/doctor.py                # debe terminar en "0 FALLA"
+python scripts/doctor.py                # debe terminar en "0 FALLA"
 ```
 
 Para no descargar 4.8 GB, copiar los modelos desde el equipo viejo (un disco USB o la carpeta del repo viejo montada):
 
 ```bash
-./setup_env.sh --source-dir /media/usb/Rescue_ParaLingbot
+scripts/setup_env.sh --source-dir /media/usb/Rescue_ParaLingbot
 ```
 
 Si el equipo es una **laptop con GPU NVIDIA**, correr una sola vez (no hay que repetirlo al encender):
 
 ```bash
-sudo scripts_gpu/fix_nvidia_suspend.sh && sudo reboot
+sudo src/gpu/fix_nvidia_suspend.sh && sudo reboot
 ```
 
 Sin esto, suspender la laptop con un proceso de GPU abierto deja CUDA inutilizable hasta reiniciar.
 
-`./setup_env.sh --dry-run` muestra todos los comandos sin ejecutar nada.
+`scripts/setup_env.sh --dry-run` muestra todos los comandos sin ejecutar nada.
 
 ## Perfiles
 
@@ -53,44 +53,44 @@ Se combinan con `--profiles core,vis,gpu,render` o `--profiles all`. `core` siem
 |---|---|---|
 | `core` | `lingbot_map` y `demo.py` | torch, numpy < 2, scipy, opencv, checkpoint |
 | `vis` | Visor web, export GLB, `--mask_sky` | viser, trimesh, matplotlib, onnxruntime, `skyseg.onnx` |
-| `gpu` | Monitoreo de `scripts_gpu/` y `scripts_seq/` | psutil, nvidia-ml-py |
+| `gpu` | Monitoreo de `src/gpu/` y `src/secuencias/` | psutil, nvidia-ml-py |
 | `flashinfer` | Atención con KV cache paginado (sin `--use_sdpa`) | flashinfer-python. No cabe en GPUs de 8 GB |
-| `render` | Video MP4 offline de `demo_render/` | open3d, extensiones CUDA, Kaolin, ffmpeg, `skyseg_batch.onnx`. Necesita un CUDA toolkit: `--install-cuda-toolkit` lo baja a `~/cuda-X.Y` sin sudo (~4 GB) |
+| `render` | Video MP4 offline de `src/upstream/demo_render/` | open3d, extensiones CUDA, Kaolin, ffmpeg, `skyseg_batch.onnx`. Necesita un CUDA toolkit: `--install-cuda-toolkit` lo baja a `~/cuda-X.Y` sin sudo (~4 GB) |
 | `bench` | `benchmark/` | evo, OpenEXR, plyfile, open3d |
 
 ## Uso diario
 
 ```bash
 source .venv/bin/activate
-scripts_gpu/run_gpu.sh -- python demo.py --model_path checkpoints/lingbot-map.pt \
-    --image_folder example/courthouse --mask_sky \
+src/gpu/run_gpu.sh -- python demo.py --model_path checkpoints/lingbot-map.pt \
+    --image_folder datos/example/courthouse --mask_sky \
     --use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 --offload_to_cpu
 ```
 
-Esos flags son los validados para 8 GB de VRAM. `tools/doctor.py` indica cuáles usar según la GPU del equipo. `run_gpu.sh` revisa antes que no haya procesos viejos ocupando la GPU y bloquea la suspensión mientras el comando corre.
+Esos flags son los validados para 8 GB de VRAM. `scripts/doctor.py` indica cuáles usar según la GPU del equipo. `run_gpu.sh` revisa antes que no haya procesos viejos ocupando la GPU y bloquea la suspensión mientras el comando corre.
 
 ## Cuando algo falla
 
-Correr `python tools/doctor.py` (o `--profiles all`). Cada `[FALLA]` trae debajo el comando que la corrige. Casos frecuentes:
+Correr `python scripts/doctor.py` (o `--profiles all`). Cada `[FALLA]` trae debajo el comando que la corrige. Casos frecuentes:
 
-- **Se movió o se renombró la carpeta del repo:** `import lingbot_map` carga otra copia o falla. Volver a correr `./setup_env.sh`; no reinstala lo que ya está.
+- **Se movió o se renombró la carpeta del repo:** `import lingbot_map` carga otra copia o falla. Volver a correr `scripts/setup_env.sh`; no reinstala lo que ya está.
 - **Un `pip install` suelto subió numpy a 2.x:** instalar siempre con `-c env/constraints.txt`, que lo impide.
-- **CUDA dejó de funcionar:** `scripts_gpu/gpu_preflight.sh` distingue entre un proceso viejo, una suspensión y un driver actualizado sin reiniciar.
-- **Archivo de modelo incompleto o corrupto:** `python tools/fetch_assets.py` lo detecta por SHA256, lo aparta como `.invalid` y lo vuelve a obtener.
+- **CUDA dejó de funcionar:** `src/gpu/gpu_preflight.sh` distingue entre un proceso viejo, una suspensión y un driver actualizado sin reiniciar.
+- **Archivo de modelo incompleto o corrupto:** `python scripts/fetch_assets.py` lo detecta por SHA256, lo aparta como `.invalid` y lo vuelve a obtener.
 
 ## Actualizar una versión
 
-1. Probar el cambio en un entorno aparte: `./setup_env.sh --venv /tmp/venv-prueba --profiles all`.
-2. Correr ahí `tools/doctor.py --profiles all` y una corrida real de `demo.py`.
+1. Probar el cambio en un entorno aparte: `scripts/setup_env.sh --venv /tmp/venv-prueba --profiles all`.
+2. Correr ahí `scripts/doctor.py --profiles all` y una corrida real de `demo.py`.
 3. Recién entonces editar la línea en `env/constraints.txt` y hacer commit.
 
 ## Instalación en modo usuario (sin venv)
 
-La máquina de referencia está instalada así, en `~/.local`: `./setup_env.sh --mode user`. Funciona igual, pero comparte paquetes con el resto del sistema (en esa máquina, workspaces de ROS2). Para un equipo nuevo se recomienda el venv.
+La máquina de referencia está instalada así, en `~/.local`: `scripts/setup_env.sh --mode user`. Funciona igual, pero comparte paquetes con el resto del sistema (en esa máquina, workspaces de ROS2). Para un equipo nuevo se recomienda el venv.
 
 ## Windows (no probado)
 
-`setup_env.sh` es solo para Linux. `tools/doctor.py` y `tools/fetch_assets.py` sí funcionan en Windows. Instalación manual de `core` y `vis` en PowerShell:
+`scripts/setup_env.sh` es solo para Linux. `scripts/doctor.py` y `scripts/fetch_assets.py` sí funcionan en Windows. Instalación manual de `core` y `vis` en PowerShell:
 
 ```powershell
 py -3.10 -m venv .venv

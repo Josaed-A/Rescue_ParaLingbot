@@ -1,6 +1,6 @@
 """Drive the sequential-characterization campaign across frame-count tiers.
 
-Launches scripts_seq/run_single.py as a completely fresh subprocess for every
+Launches src/secuencias/run_single.py as a completely fresh subprocess for every
 repetition (never reuses a process), with CUDA hidden so the FP32 CPU baseline is
 preserved. Never silently drops a failed run: if run_single.py exits non-zero, times
 out, or gets killed (OOM/SIGKILL) without writing a JSON, a synthetic failure record
@@ -14,12 +14,12 @@ import subprocess
 import sys
 import time
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SEQUENCE_DIR = os.path.join(REPO_ROOT, "example", "courthouse")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SEQUENCE_DIR = os.path.join(REPO_ROOT, "datos/example", "courthouse")
 MODEL_PATH = os.path.join(REPO_ROOT, "checkpoints", "lingbot-map.pt")
-RESULTS_JSONL = os.path.join(REPO_ROOT, "results", "campaign_results.jsonl")
-JSON_DIR = os.path.join(REPO_ROOT, "results", "json")
-CSV_DIR = os.path.join(REPO_ROOT, "results", "csv")
+RESULTS_JSONL = os.path.join(REPO_ROOT, "registros/results", "campaign_results.jsonl")
+JSON_DIR = os.path.join(REPO_ROOT, "registros/results", "json")
+CSV_DIR = os.path.join(REPO_ROOT, "registros/results", "csv")
 
 # (num_frames, num_repetitions) — matches the campaign design in README.md.
 TIERS = [(25, 5), (50, 5), (100, 3), (200, 3)]
@@ -44,7 +44,7 @@ def run_one(num_frames, rep_idx, sequence_dir=SEQUENCE_DIR, timeout_s=None,
     out_json = os.path.join(JSON_DIR, f"{run_id}.json")
     csv_out = os.path.join(CSV_DIR, f"{run_id}.csv")
     cmd = [
-        sys.executable, os.path.join(REPO_ROOT, "scripts_seq", "run_single.py"),
+        sys.executable, os.path.join(REPO_ROOT, "src/secuencias", "run_single.py"),
         "--num_frames", str(num_frames),
         "--sequence_dir", sequence_dir,
         "--model_path", MODEL_PATH,
@@ -130,9 +130,9 @@ def main():
     )
     p.add_argument(
         "--sequence_dir", type=str, default=SEQUENCE_DIR,
-        help="Override the frame sequence folder (default: example/courthouse, "
+        help="Override the frame sequence folder (default: datos/example/courthouse, "
              "the one used by Phases 1-5). Pass a different real ordered "
-             "trajectory folder (e.g. example/university) when the default "
+             "trajectory folder (e.g. datos/example/university) when the default "
              "sequence doesn't have enough frames for the requested N.",
     )
     p.add_argument(

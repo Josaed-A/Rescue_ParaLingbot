@@ -22,7 +22,7 @@ Metrics (all shape-only):
                    proportions; the scale itself is fitted, so this is a check)
 
 Usage:
-  python3 scripts_context/compare_route.py --npz run.npz --sketch ruta.jpeg \
+  python3 src/mapas/compare_route.py --npz run.npz --sketch ruta.jpeg \
       --out_json route.json --out_png route.png [--label v5]
 """
 import argparse

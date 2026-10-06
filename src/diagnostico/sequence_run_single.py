@@ -18,7 +18,7 @@ doing so would require wrapping/reimplementing its internal per-frame loop,
 risking an unintended behavior change to the exact code path being
 measured. Instead, per the "o intervalo fijo" allowance, temporal
 resolution comes from the external high-frequency monitor
-(scripts/measure_ram_safety.ps1, 1s samples) run in parallel by the
+(src/diagnostico/measure_ram_safety.ps1, 1s samples) run in parallel by the
 orchestrator — this script only emits stage snapshots at fixed boundaries
 (start, after load, after inference) using the OS-tracked peak counters
 (peak_ws/peak_pagefile), which are valid over the whole process lifetime
@@ -39,7 +39,7 @@ from pathlib import Path
 
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
 class _ProcessMemoryCountersEx(ctypes.Structure):

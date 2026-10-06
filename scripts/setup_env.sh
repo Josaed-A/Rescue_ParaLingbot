@@ -5,25 +5,25 @@
 # Modular: elegir solo lo necesario con --profiles (separados por coma):
 #   core        lingbot_map + demo.py: torch, numpy<2, scipy, opencv...     [por defecto]
 #   vis         visor viser, export GLB, --mask_sky                          [por defecto]
-#   gpu         monitoreo RAM/VRAM de scripts_gpu/ y scripts_seq/            [por defecto]
+#   gpu         monitoreo RAM/VRAM de src/gpu/ y src/secuencias/            [por defecto]
 #   flashinfer  KV cache paginado (solo útil en GPUs de 16 GB o más)
-#   render      demo_render/ (MP4 offline): open3d, extensiones CUDA, Kaolin
+#   render      src/upstream/demo_render/ (MP4 offline): open3d, extensiones CUDA, Kaolin
 #               compilado desde fuente (necesita CUDA toolkit), ffmpeg
 #   bench       benchmark/: evo, OpenEXR, plyfile, open3d
 #   all         todos los anteriores
 #
 # Uso:
-#   ./setup_env.sh                                  # .venv con core,vis,gpu + archivos de modelo
-#   ./setup_env.sh --profiles all
-#   ./setup_env.sh --source-dir /media/usb/Rescue_ParaLingbot   # copiar modelos en vez de descargar
-#   ./setup_env.sh --mode user                      # instalar en ~/.local (sin venv)
-#   ./setup_env.sh --torch cpu                      # forzar torch de CPU (auto: según el driver)
-#   ./setup_env.sh --profiles render --install-cuda-toolkit      # baja el toolkit a ~/cuda-X.Y
-#   ./setup_env.sh --dry-run                        # mostrar el plan sin ejecutar nada
-# Después: source .venv/bin/activate && python tools/doctor.py
+#   scripts/setup_env.sh                                  # .venv con core,vis,gpu + archivos de modelo
+#   scripts/setup_env.sh --profiles all
+#   scripts/setup_env.sh --source-dir /media/usb/Rescue_ParaLingbot   # copiar modelos en vez de descargar
+#   scripts/setup_env.sh --mode user                      # instalar en ~/.local (sin venv)
+#   scripts/setup_env.sh --torch cpu                      # forzar torch de CPU (auto: según el driver)
+#   scripts/setup_env.sh --profiles render --install-cuda-toolkit      # baja el toolkit a ~/cuda-X.Y
+#   scripts/setup_env.sh --dry-run                        # mostrar el plan sin ejecutar nada
+# Después: source .venv/bin/activate && python scripts/doctor.py
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 TORCH_VERSION="2.12.0"
@@ -69,7 +69,7 @@ done
 has() { case ",$PROFILES," in *,"$1",*) return 0 ;; *) return 1 ;; esac; }
 
 # --- Comprobaciones previas -------------------------------------------------
-[ "$(uname -s)" = "Linux" ] || die "este instalador es para Linux; en Windows seguir SETUP.md"
+[ "$(uname -s)" = "Linux" ] || die "este instalador es para Linux; en Windows seguir docs/SETUP.md"
 command -v "$PY" >/dev/null || die "no se encontró $PY (usar --python python3.X)"
 PYVER=$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')
 case "$PYVER" in 3.10|3.11|3.12|3.13) ;;
@@ -107,7 +107,7 @@ echo "    modo:     $MODE$([ "$MODE" = venv ] && echo " ($VENV)")"
 echo "    python:   $PY ($PYVER)"
 echo "    torch:    $TORCH_VERSION+$TORCH   (driver: ${DRIVER:-sin GPU NVIDIA})"
 # ROS2 (setup.bash) exporta PYTHONPATH con sus site-packages: se cuelan en cualquier venv.
-# Se ignora para instalar; tools/doctor.py avisa si al ejecutar tapa algún paquete.
+# Se ignora para instalar; scripts/doctor.py avisa si al ejecutar tapa algún paquete.
 [ -n "${PYTHONPATH:-}" ] && echo "    PYTHONPATH definido (¿ROS2?): se ignora durante la instalación"
 [ "$DRY" = 1 ] && echo "    (dry-run: solo se muestran los comandos)"
 
@@ -206,7 +206,7 @@ if has render; then
       CUDA_HOME_FOUND="$TK_DIR"
     else
       die "falta un CUDA toolkit $CUDA_MAJOR.x (nvcc) para compilar. Opciones:
-  ./setup_env.sh --profiles $PROFILES --install-cuda-toolkit   (~4 GB, sin sudo, queda en $TK_DIR)
+  scripts/setup_env.sh --profiles $PROFILES --install-cuda-toolkit   (~4 GB, sin sudo, queda en $TK_DIR)
   o exportar CUDA_HOME apuntando a un toolkit $CUDA_MAJOR.x existente"
     fi
   fi
@@ -223,17 +223,17 @@ fi
 # --- Archivos de modelo -----------------------------------------------------------
 if [ "$SKIP_ASSETS" = 0 ]; then
   step "Archivos de modelo (verificados con SHA256)"
-  run "$PY" tools/fetch_assets.py --profiles "$PROFILES" "${SOURCE_DIRS[@]}"
+  run "$PY" scripts/fetch_assets.py --profiles "$PROFILES" "${SOURCE_DIRS[@]}"
 fi
 
 # --- Verificación ---------------------------------------------------------------
-step "Verificación (tools/doctor.py)"
+step "Verificación (scripts/doctor.py)"
 if [ "$DRY" = 1 ]; then
   echo "    (dry-run: se omite)"
   exit 0
 fi
 set +e
-"$PYBIN" tools/doctor.py --profiles "$PROFILES"
+"$PYBIN" scripts/doctor.py --profiles "$PROFILES"
 STATUS=$?
 set -e
 
@@ -241,6 +241,6 @@ step "Siguiente paso"
 [ "$MODE" = "venv" ] && echo "    En cada terminal nueva:  source ${VENV#"$ROOT"/}/bin/activate"
 if [ -r /proc/driver/nvidia/params ] && ls /sys/class/power_supply/BAT* >/dev/null 2>&1 \
    && ! grep -q 'PreserveVideoMemoryAllocations: 1' /proc/driver/nvidia/params; then
-  echo "    Laptop, una sola vez por equipo:  sudo scripts_gpu/fix_nvidia_suspend.sh && sudo reboot"
+  echo "    Laptop, una sola vez por equipo:  sudo src/gpu/fix_nvidia_suspend.sh && sudo reboot"
 fi
 exit $STATUS

@@ -23,7 +23,7 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 def main():
@@ -95,12 +95,12 @@ def main():
                          "the same sliding window span more of the walk (more temporal "
                          "context) at a coarser sampling of it.")
     p.add_argument("--manifest", type=str, default=None,
-                    help="manifest.json from scripts_context/curate_and_synthesize.py. "
+                    help="manifest.json from src/mapas/curate_and_synthesize.py. "
                          "Synthetic frames are fed to the model (temporal context for "
                          "pose) but removed before building the map.")
     p.add_argument("--save_predictions", type=str, default=None,
                     help="Save poses, depth, confidence and images to this .npz for "
-                         "scripts_context/evaluate_consistency.py and export_dense_cloud.py.")
+                         "src/mapas/evaluate_consistency.py and export_dense_cloud.py.")
     p.add_argument("--save_ds", type=int, default=2,
                     help="Downsampling of the saved .npz: 2 = half resolution (light, "
                          "enough to evaluate), 1 = full 518x518 per-pixel depth (needed "

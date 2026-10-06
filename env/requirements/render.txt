@@ -1,13 +1,13 @@
-# demo_render/ (renderizador MP4 offline). Además, setup_env.sh --profiles render compila
-# demo_render/render_cuda_ext, compila Kaolin desde fuente y consigue ffmpeg.
+# src/upstream/demo_render/ (renderizador MP4 offline). Además, scripts/setup_env.sh --profiles render compila
+# src/upstream/demo_render/render_cuda_ext, compila Kaolin desde fuente y consigue ffmpeg.
 open3d
 pyyaml
 onnxruntime-gpu
 aiohttp
-# Gaussian Splatting (scripts_context/gsplat_train.py): compila sus kernels CUDA en el primer
+# Gaussian Splatting (src/mapas/gsplat_train.py): compila sus kernels CUDA en el primer
 # uso con el mismo toolkit que Kaolin (~2 min, una sola vez, en ~/.cache/torch_extensions)
 gsplat
 jaxtyping
-# Filtro geométrico (scripts_context/geo_filter.py): segmentación semántica con SegFormer-B0
+# Filtro geométrico (src/mapas/geo_filter.py): segmentación semántica con SegFormer-B0
 # (los pesos, ~15 MB, se bajan de Hugging Face en el primer uso)
 transformers

@@ -9,7 +9,7 @@
 #   - el OOM killer del kernel elige primero procesos de VS Code y Firefox.
 # Aislado en su scope y con MemoryMax, si el trabajo se pasa de memoria muere él solo.
 #
-# Uso: scripts_gpu/run_isolated.sh [--max 12G] [--name nombre] -- comando ...
+# Uso: src/gpu/run_isolated.sh [--max 12G] [--name nombre] -- comando ...
 # Por defecto MemoryMax = RAM disponible al lanzar - 4 GB (mínimo 3 GB, máximo RAM total - 8 GB):
 # el escritorio, Firefox y VS Code ya ocupan ~14 GB en esta máquina, y un tope calculado sobre
 # la RAM total (22 GB) dejó que la presión subiera tanto que systemd-oomd mató a GNOME Shell

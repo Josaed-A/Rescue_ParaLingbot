@@ -13,7 +13,7 @@ corten otras sesiones, por ejemplo un scrcpy abierto en otra terminal).
 
 Cámara IP (IP Webcam, RTSP, MJPEG): cualquier URL que abra `cv2.VideoCapture`.
 
-Uso suelto, para probar:  python3 scripts_stream/android_camera.py [serial] [camera_id]
+Uso suelto, para probar:  python3 src/vivo/android_camera.py [serial] [camera_id]
 """
 import os
 import re
@@ -27,7 +27,7 @@ import time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
+REPO = os.path.dirname(os.path.dirname(HERE))
 CEL_REPO = os.environ.get("CEL_RESCUE_DIR", os.path.join(os.path.dirname(REPO), "cel-en-rescue"))
 SCRCPY_VERSION = os.environ.get("SCRCPY_VERSION", "4.1")      # debe coincidir con el jar
 REMOTE_JAR = "/data/local/tmp/lingbot-scrcpy-server.jar"     # nombre propio: no pisa el de scrcpy
@@ -145,6 +145,8 @@ class AndroidCamera:
         self.port = None
         self.server = self.ffmpeg = self.sock = None
         self.frame, self.frame_id, self.last_id = None, 0, 0
+        self.stamp = 0.0                     # hora (time.time()) en que se decodificó self.frame
+        self.on_frame = None                 # callable(frame, stamp, frame_id) por cada frame decodificado
         self.cv = threading.Condition()
         self.closed = False
         self.error = None
@@ -241,21 +243,33 @@ class AndroidCamera:
             if not buf or len(buf) < n:
                 break
             fr = np.frombuffer(buf, np.uint8).reshape(self.oh, self.ow, 3)
+            t = time.time()                  # hora de captura (al salir del decodificador)
             with self.cv:
-                self.frame, self.frame_id = fr, self.frame_id + 1
+                self.frame, self.frame_id, self.stamp = fr, self.frame_id + 1, t
+                fid = self.frame_id
                 self.cv.notify_all()
+            if self.on_frame is not None:
+                try:
+                    self.on_frame(fr, t, fid)
+                except Exception as e:
+                    self.error = self.error or f"on_frame: {e}"
         with self.cv:
             self.closed = True
             self.cv.notify_all()
 
-    def read(self, timeout=8.0):
-        """Siguiente frame (el más reciente que no se devolvió); None si el stream terminó."""
+    def read_meta(self, timeout=8.0):
+        """(frame, stamp, frame_id) del más reciente que no se devolvió; None si el stream terminó."""
         with self.cv:
             ok = self.cv.wait_for(lambda: self.frame_id > self.last_id or self.closed, timeout)
             if not ok or self.frame_id <= self.last_id:
                 return None
             self.last_id = self.frame_id
-            return self.frame.copy()
+            return self.frame.copy(), self.stamp, self.frame_id
+
+    def read(self, timeout=8.0):
+        """Siguiente frame (el más reciente que no se devolvió); None si el stream terminó."""
+        r = self.read_meta(timeout)
+        return None if r is None else r[0]
 
     def latest(self):
         """(id, frame) del último frame decodificado, sin consumirlo (para la vista previa)."""

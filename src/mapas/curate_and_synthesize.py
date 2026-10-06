@@ -18,7 +18,7 @@ Writes <out_dir>/frames/NNNNNN.png (real frames are hard links to candidates),
 <out_dir>/manifest.json and <out_dir>/synthetic_examples.png.
 
 Usage:
-  python3 scripts_context/curate_and_synthesize.py --analysis <analysis.json> --out_dir <prueba_dir>
+  python3 src/mapas/curate_and_synthesize.py --analysis <analysis.json> --out_dir <prueba_dir>
 """
 import argparse
 import json

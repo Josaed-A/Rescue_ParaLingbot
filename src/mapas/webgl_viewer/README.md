@@ -6,14 +6,14 @@ inicie una sesión en vivo no se carga el modelo ni se toca la GPU: sólo sirve 
 que ya están en `captures/`.
 
 ```bash
-scripts_context/webgl_viewer/launch.py            # http://localhost:8090
-scripts_context/webgl_viewer/launch.py --port 8095 --no-open
+src/mapas/webgl_viewer/launch.py            # http://localhost:8090
+src/mapas/webgl_viewer/launch.py --port 8095 --no-open
 ```
 
-El servidor es **uno solo** (`scripts_stream/live_server.py`) y hace dos cosas: sirve las
+El servidor es **uno solo** (`src/vivo/live_server.py`) y hace dos cosas: sirve las
 nubes ya exportadas y ofrece el **mapeo en vivo** por WebSocket. El modelo se carga
 únicamente si se inicia una sesión en vivo; mirar nubes no toca la GPU.
-Ver [../../scripts_stream/README.md](../../scripts_stream/README.md).
+Ver [../../src/vivo/README.md](../../vivo/README.md).
 
 ## Qué agrega respecto del visor `viser`
 
@@ -45,17 +45,17 @@ tarjeta con su título, su zona, sus categorías y un botón por cada mapa que t
 
 El panel "Mapeo en vivo" tiene además las casillas **analizador de contexto** (activada por
 defecto: salta frames redundantes y elige el más nítido) y **sintetizar frames intermedios**
-(ver [scripts_stream/README.md](../../scripts_stream/README.md)).
+(ver [src/vivo/README.md](../../vivo/README.md)).
 
 - **Agrupar** por zona, por categoría (una prueba aparece en cada una de sus categorías),
   por carpeta o por fecha; **buscar** por texto; **filtrar** con los chips de categoría.
 - **✎ datos:** título, zona de la universidad, categorías (sugeridas o nuevas) y notas. Se
   guardan en el `info.json` de la prueba sin tocar el resto de sus claves.
-- **⚙ construir mapas:** genera los mapas que falten con `scripts_context/build_maps.py`.
+- **⚙ construir mapas:** genera los mapas que falten con `src/mapas/build_maps.py`.
 - **📁 archivos:** árbol de la carpeta de la prueba. Los mapas se cargan con un clic; el resto
   (imágenes, videos, json) se abre en otra pestaña.
 - Las sesiones en vivo quedan como "sin guardar" hasta que se guardan con nombre (ver
-  `scripts_stream/README.md`).
+  `src/vivo/README.md`).
 
 Todos los mapas de una prueba usan la trayectoria de `exports/webgl/<n>_cameras.json`,
 así que la nube, la malla y el splat se orientan igual (no sólo la nube cruda).
@@ -92,8 +92,8 @@ después de la primera pulsación de un botón.
 | `*_raw.ply` + `*_cameras.json` | nube por-frame (con el solape que produce el modelo) más la trayectoria |
 | `*.glb` | mapas exportados por `process_and_view.py` / el visor viser |
 
-Para generar los dos primeros ver `scripts_context/export_dense_cloud.py`; para
-el tercero, `scripts_context/npz_to_webgl.py` (convierte un `.npz` de
+Para generar los dos primeros ver `src/mapas/export_dense_cloud.py`; para
+el tercero, `src/mapas/npz_to_webgl.py` (convierte un `.npz` de
 `--save_predictions` en nube + trayectoria).
 
 ## Todos los mapas se navegan igual
@@ -127,7 +127,7 @@ webgl_viewer/
                       trayectoria, y el cliente WebSocket del mapeo en vivo
   vendor/             three.js 0.160, sus addons y gaussian-splats-3d 0.4.7 (funciona offline)
 ```
-El servidor vive en `scripts_stream/live_server.py`.
+El servidor vive en `src/vivo/live_server.py`.
 
 ## Límites conocidos
 

@@ -167,37 +167,117 @@ function fpsMove(dt) {
 const DEADZONE = 0.15;
 function axis(v) { return Math.abs(v) < DEADZONE ? 0 : v; }
 
+// Mando recordado: el último mando con el que se navegó queda guardado en este navegador y se
+// prefiere sobre cualquier otro dispositivo que el navegador exponga como "gamepad" (en Linux
+// Firefox también muestra acelerómetros y otros dispositivos de entrada).
+const PAD_KEY = "visor.gamepad.preferido";
+let padPreferred = null;
+try { padPreferred = localStorage.getItem(PAD_KEY); } catch (e) { /* sin almacenamiento */ }
+const padTrig = {};            // ejes de gatillo que ya se movieron (antes de moverse valen 0, no -1)
+
 function getPad() {
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  for (const p of pads) if (p) return p;
-  return null;
+  const pads = (navigator.getGamepads ? Array.from(navigator.getGamepads()) : []).filter(
+    (p) => p && p.connected !== false && p.axes.length >= 4 && p.buttons.length >= 8);
+  if (!pads.length) return null;
+  return pads.find((p) => p.id === padPreferred) || pads[0];
 }
+
+// Estado normalizado del mando. Dos mapeos:
+//  - "standard" (W3C; Chrome y Firefox con mandos conocidos): ejes LX LY RX RY, gatillos = botones 6/7
+//  - el de xpad/evdev en Linux sin remapeo: ejes LX LY LT RX RY RT HATX HATY (gatillos de -1 a 1),
+//    botones A B X Y LB RB Back Start Guide LS RS
+function readPad() {
+  const pad = getPad();
+  if (!pad) return null;
+  const ax = pad.axes, bt = pad.buttons, b = (k) => !!(bt[k] && bt[k].pressed);
+  if (pad.mapping === "standard") {
+    return { pad, lx: axis(ax[0] || 0), ly: axis(ax[1] || 0), rx: axis(ax[2] || 0), ry: axis(ax[3] || 0),
+             lt: bt[6] ? bt[6].value : 0, rt: bt[7] ? bt[7].value : 0,
+             a: b(0), bb: b(1), x: b(2), y: b(3), lb: b(4), rb: b(5), back: b(8), start: b(9),
+             any: bt.some((q) => q && q.pressed) };
+  }
+  const trig = (k) => {
+    const v = ax[k] || 0;
+    if (v !== 0) padTrig[k] = true;
+    return padTrig[k] ? Math.max(0, (v + 1) / 2) : 0;
+  };
+  return { pad, lx: axis(ax[0] || 0), ly: axis(ax[1] || 0), rx: axis(ax[3] || 0), ry: axis(ax[4] || 0),
+           lt: ax.length >= 6 ? trig(2) : 0, rt: ax.length >= 6 ? trig(5) : 0,
+           a: b(0), bb: b(1), x: b(2), y: b(3), lb: b(4), rb: b(5), back: b(6), start: b(7),
+           any: bt.some((q) => q && q.pressed) };
+}
+
+function rememberPad(pad) {
+  if (!pad || pad.id === padPreferred) return;
+  padPreferred = pad.id;
+  try { localStorage.setItem(PAD_KEY, pad.id); } catch (e) { /* sin almacenamiento */ }
+}
+
 function gamepadSprint() {
-  const pad = getPad();
-  return !!(pad && pad.buttons[0] && pad.buttons[0].pressed); // A
+  const st = readPad();
+  return !!(st && st.a);
 }
-let lastStart = false;
+
+window.addEventListener("gamepadconnected", (e) => {
+  const st = document.getElementById("gamepad-status");
+  if (st) st.textContent = e.gamepad.id.slice(0, 22) + (e.gamepad.id === padPreferred ? " (recordado)" : "");
+});
+window.addEventListener("gamepaddisconnected", () => {
+  const st = document.getElementById("gamepad-status");
+  if (st) st.textContent = "desconectado";
+});
+
+// Se llama en cada cuadro, en los dos modos: estado del panel, Start alterna órbita / 1ª persona,
+// y en órbita el mando también navega (stick izq. gira alrededor del objetivo, stick der. desplaza,
+// gatillos acercan/alejan).
+let lastStart = false, lastBack = false;
+const _sph = new THREE.Spherical(), _off = new THREE.Vector3(), _pan = new THREE.Vector3();
+function pollGamepad(dt) {
+  const st = readPad();
+  const label = document.getElementById("gamepad-status");
+  if (!st) { if (label) label.textContent = navigator.getGamepads ? "no detectado (pulsa un botón)" : "no soportado"; return null; }
+  if (st.any) rememberPad(st.pad);
+  if (label) label.textContent = st.pad.id.split("(")[0].replace(/^[0-9a-f]{4}-[0-9a-f]{4}-/i, "").trim().slice(0, 26) +
+    (st.pad.id === padPreferred ? " ✓" : "");
+  if (st.start && !lastStart) setMode(fps.active ? "orbit" : "fps");
+  lastStart = st.start;
+  if (st.back && !lastBack && typeof lastBox !== "undefined" && lastBox) {   // View/Back: volver a encuadrar
+    const g = (live.framed && live.group) ? live.group : loadedGroup;
+    if (g) frameScene(normalizeGroup(g, lastBox, lastDown));
+  }
+  lastBack = st.back;
+  if (fps.active) return st;
+  const moving = st.lx || st.ly || st.rx || st.ry || st.lt > 0.05 || st.rt > 0.05;
+  if (!moving) return st;
+  if (live.follow && live.running) { live.follow = false; document.getElementById("live-follow").checked = false; }
+  _off.copy(camera.position).sub(orbit.target);
+  _sph.setFromVector3(_off);
+  _sph.theta -= st.lx * 1.8 * dt;
+  _sph.phi = THREE.MathUtils.clamp(_sph.phi + st.ly * 1.4 * dt, 0.05, Math.PI - 0.05);
+  _sph.radius = THREE.MathUtils.clamp(_sph.radius * Math.exp((st.lt - st.rt) * 1.2 * dt), 0.05, 500);
+  _off.setFromSpherical(_sph);
+  // desplazamiento en el plano de la vista, proporcional a la distancia
+  camera.updateMatrixWorld();
+  const r = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+  const u = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+  _pan.set(0, 0, 0).addScaledVector(r, st.rx).addScaledVector(u, -st.ry).multiplyScalar(_sph.radius * 0.8 * dt);
+  orbit.target.add(_pan);
+  camera.position.copy(orbit.target).add(_off);
+  return st;
+}
+
 function applyGamepad(dt, forward, right, speed) {
-  const pad = getPad();
-  document.getElementById("gamepad-status").textContent = pad ? pad.id.slice(0, 22) : "no detectado";
-  if (!pad) return;
-  const lx = axis(pad.axes[0] || 0), ly = axis(pad.axes[1] || 0);
-  const rx = axis(pad.axes[2] || 0), ry = axis(pad.axes[3] || 0);
-  const rt = pad.buttons[7] ? pad.buttons[7].value : 0;
-  const lt = pad.buttons[6] ? pad.buttons[6].value : 0;
-  const start = pad.buttons[9] && pad.buttons[9].pressed;
-
-  if (start && !lastStart) setMode(fps.active ? "orbit" : "fps");
-  lastStart = !!start;
-
-  if (!fps.active) return;
+  const st = readPad();
+  if (!st || !fps.active) return;
+  // LB / RB: más lento / más rápido mientras se mantienen
+  const k = st.rb ? 2.5 : (st.lb ? 0.35 : 1);
   const move = new THREE.Vector3();
-  move.addScaledVector(forward, -ly);
-  move.addScaledVector(right, lx);
-  move.y += rt - lt;
-  if (move.lengthSq() > 0) camera.position.addScaledVector(move.normalize(), speed * dt * Math.hypot(lx, ly, rt - lt || 0.001));
-  fps.yaw -= rx * 2.2 * dt;
-  fps.pitch -= ry * 1.8 * dt;
+  move.addScaledVector(forward, -st.ly);
+  move.addScaledVector(right, st.lx);
+  move.y += st.rt - st.lt;
+  if (move.lengthSq() > 0) camera.position.addScaledVector(move.normalize(), k * speed * dt * Math.hypot(st.lx, st.ly, st.rt - st.lt || 0.001));
+  fps.yaw -= st.rx * 2.2 * dt;
+  fps.pitch -= st.ry * 1.8 * dt;
   fps.pitch = THREE.MathUtils.clamp(fps.pitch, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
 }
 
@@ -590,6 +670,15 @@ async function loadMap(meta) {
         const camData = await camRes.json();
         cameraPoses = camData.cameras;
         const { group, positions } = buildCameraVisuals(cameraPoses);
+        // etapa 16: trayectorias BASIC / STELLA / HYBRID guardadas con la sesión
+        for (const [mode, pts] of Object.entries(camData.trayectorias || {})) {
+          if (mode === "basic" || !pts.length) continue;      // BASIC ya es la trayectoria de cámaras
+          const g = new THREE.BufferGeometry();
+          g.setAttribute("position", new THREE.Float32BufferAttribute(pts.flat(), 3));
+          const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: TRACK_COLORS[mode] || 0xffffff, depthTest: false }));
+          line.renderOrder = 5;
+          group.add(line);
+        }
         group.visible = document.getElementById("show-cams").checked;
         loadedGroup.add(group);
         camMarker = new THREE.Mesh(
@@ -686,7 +775,12 @@ const live = {
   // vista se deslizan hacia ella en cada cuadro, en vez de saltar
   marker: null, tgtPos: new THREE.Vector3(), tgtQuat: new THREE.Quaternion(), hasPose: false,
   follow: true,
+  // etapa 16: rango de puntos de cada frame (para re-registrarlo con `repose`), trayectorias de los
+  // tres modos, keyframes de Stella y marcas de corrección
+  ranges: {}, tracks: {}, kf: null, corr: null, nCorr: 0,
 };
+const TRACK_COLORS = { basic: 0xbbbbbb, stella: 0xff9933, hybrid: 0x33dd66 };
+const TRACK_MAX = 20000;
 
 function liveEnsureScene() {
   if (live.group) return;
@@ -724,17 +818,112 @@ function liveEnsureScene() {
   live.marker.renderOrder = 10;
   live.marker.visible = false;
   live.group.add(live.marker);
+  // etapa 16: trayectorias BASIC / STELLA / HYBRID (mismo mundo que la nube), keyframes y correcciones
+  for (const m of Object.keys(TRACK_COLORS)) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(TRACK_MAX * 3), 3));
+    g.setDrawRange(0, 0);
+    const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: TRACK_COLORS[m], depthTest: false }));
+    line.frustumCulled = false; line.renderOrder = 5;
+    live.tracks[m] = { geo: g, line, n: 0 };
+    live.group.add(line);
+  }
+  const mkPts = (n, color, size) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    g.setDrawRange(0, 0);
+    const p = new THREE.Points(g, new THREE.PointsMaterial({ color, size, sizeAttenuation: false, depthTest: false }));
+    p.frustumCulled = false; p.renderOrder = 6;
+    live.group.add(p);
+    return { geo: g, pts: p, n: 0, max: n };
+  };
+  live.kf = mkPts(5000, 0x3399ff, 6);
+  live.corr = mkPts(2000, 0xff2222, 12);
   scene.add(live.group);
 }
+
+// etapa 16: una posición nueva en la trayectoria de un modo
+function liveTrackPush(mode, p) {
+  const t = live.tracks[mode];
+  if (!t || t.n >= TRACK_MAX || !p) return;
+  t.geo.attributes.position.setXYZ(t.n, p[0], p[1], p[2]);
+  t.n += 1;
+  t.geo.attributes.position.needsUpdate = true;
+  t.geo.setDrawRange(0, t.n);
+}
+
+// etapa 12/16: re-registrar los puntos de un frame con la corrección `delta` (4x4 fila a fila)
+function liveRepose(fidx, d) {
+  const r = live.ranges[fidx];
+  if (!r) return;
+  const [start, n] = r;
+  const P = live.pos;
+  for (let i = start; i < start + n; i++) {
+    const x = P[3 * i], y = P[3 * i + 1], z = P[3 * i + 2];
+    P[3 * i] = d[0] * x + d[1] * y + d[2] * z + d[3];
+    P[3 * i + 1] = d[4] * x + d[5] * y + d[6] * z + d[7];
+    P[3 * i + 2] = d[8] * x + d[9] * y + d[10] * z + d[11];
+  }
+  const pa = live.geo.attributes.position;
+  pa.addUpdateRange(start * 3, n * 3); pa.needsUpdate = true;
+}
+
+function liveOnTracking(m) {
+  const box = document.getElementById("trk-box");
+  if (m.referencia || m.stella_status) box.style.display = "";
+  if (m.referencia) {
+    document.getElementById("trk-mode").textContent = m.referencia.modo.toUpperCase();
+    const src = document.getElementById("trk-src");
+    src.textContent = m.referencia.usado + (m.referencia.motivo ? ` (${m.referencia.motivo})` : "");
+    src.style.color = m.referencia.usado === "STELLA" ? "#ff9933" : "#bbbbbb";
+    document.getElementById("trk-rate").textContent = `${m.referencia.ritmo_stella_hz} poses/s`;
+  }
+  if (m.stella_status) document.getElementById("trk-stella").textContent = m.stella_status;
+  document.getElementById("trk-stamp").textContent = (m.stamp ?? 0).toFixed(3) + " s";
+  document.getElementById("trk-lat").textContent = m.latencia_s != null ? `${(m.latencia_s * 1000).toFixed(0)} ms` : "—";
+  if (m.trayectorias) {
+    liveEnsureScene();
+    for (const k of Object.keys(m.trayectorias)) liveTrackPush(k, m.trayectorias[k]);
+  }
+}
+
+function liveOnKeyframes(m) {
+  liveEnsureScene();
+  const g = live.kf.geo.attributes.position;
+  const n = Math.min(m.positions.length, live.kf.max);
+  for (let i = 0; i < n; i++) g.setXYZ(i, m.positions[i][0], m.positions[i][1], m.positions[i][2]);
+  g.needsUpdate = true; live.kf.geo.setDrawRange(0, n);
+}
+
+function liveOnCorrection(m) {
+  live.nCorr += 1;
+  document.getElementById("trk-corr").textContent =
+    `${live.nCorr} (último: ${m.keyframes_movidos} kf, ${m.frames_re_registrados} frames)`;
+  if (live.hasPose && live.corr.n < live.corr.max) {
+    const g = live.corr.geo.attributes.position;
+    g.setXYZ(live.corr.n, live.tgtPos.x, live.tgtPos.y, live.tgtPos.z);
+    live.corr.n += 1; g.needsUpdate = true; live.corr.geo.setDrawRange(0, live.corr.n);
+  }
+}
+
+for (const [id, key] of [["trk-show-basic", "basic"], ["trk-show-stella", "stella"], ["trk-show-hybrid", "hybrid"]]) {
+  document.getElementById(id).addEventListener("change", (e) => { if (live.tracks[key]) live.tracks[key].line.visible = e.target.checked; });
+}
+document.getElementById("trk-show-kf").addEventListener("change", (e) => { if (live.kf) live.kf.pts.visible = e.target.checked; });
 
 function liveReset() {
   if (!live.group) return;
   live.count = 0; live.frames = 0; live.path = []; live.framed = false; live.sticky = false;
+  live.framedDiag = 0; live.nReframe = 0;
   live.hasPose = false; live.marker.visible = false;
   live.follow = document.getElementById("live-follow").checked;
   live.down.set(0, 0, 0);
   live.geo.setDrawRange(0, 0);
   live.pathGeo.setDrawRange(0, 0);
+  live.ranges = {}; live.nCorr = 0;
+  for (const t of Object.values(live.tracks)) { t.n = 0; t.geo.setDrawRange(0, 0); }
+  if (live.kf) { live.kf.geo.setDrawRange(0, 0); live.corr.n = 0; live.corr.geo.setDrawRange(0, 0); }
+  document.getElementById("trk-corr").textContent = "0";
   document.getElementById("live-points").textContent = "0";
 }
 
@@ -770,6 +959,52 @@ function camViewSwap() {
   onResize();                      // el canvas cambia de tamaño en los dos sentidos
 }
 
+// Caja robusta de la nube en vivo (percentiles 2-98% de una muestra): unos pocos puntos lejanos o
+// frames basura (cámara tapada, desenfoque) no deben decidir la escala de todo el mapa.
+function liveRobustBox() {
+  const n = live.count;
+  if (n < 1000) return null;
+  const step = Math.max(1, Math.floor(n / 40000));
+  const xs = [], ys = [], zs = [];
+  for (let i = 0; i < n; i += step) { xs.push(live.pos[3 * i]); ys.push(live.pos[3 * i + 1]); zs.push(live.pos[3 * i + 2]); }
+  const q = (a) => { a.sort((u, v) => u - v); return [a[Math.floor(a.length * 0.02)], a[Math.floor(a.length * 0.98)]]; };
+  const [x0, x1] = q(xs), [y0, y1] = q(ys), [z0, z1] = q(zs);
+  // la trayectoria entra completa: la cámara recorrió eso aunque la nube sea rala
+  const box = new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+  for (const p of live.path) box.expandByPoint(p);
+  return box;
+}
+
+// Vuelve a normalizar el grupo en vivo con una caja nueva. No toca los controles (el tamaño de punto
+// que haya elegido el usuario se respeta); si no se está siguiendo la cámara, reubica la vista.
+function liveReframe(box, why, ratio) {
+  // el tamaño de punto de three.js no escala con el grupo: se ajusta en la misma proporción para que
+  // cada frame se vea igual de denso que antes del re-encuadre (dentro del rango del control)
+  if (ratio) {
+    const ps = document.getElementById("point-size");
+    const v = Math.min(parseFloat(ps.max), Math.max(parseFloat(ps.min), parseFloat(ps.value) / ratio));
+    ps.value = v;
+    live.points.material.size = parseFloat(ps.value);
+  }
+  lastBox = box.clone();
+  lastDown = live.down.clone().normalize();
+  const nb = normalizeGroup(live.group, lastBox, lastDown);
+  const diag = lastBox.getSize(new THREE.Vector3()).length();
+  live.framedDiag = diag;
+  live.marker.scale.setScalar(Math.max(diag * 0.04, 1e-4));
+  if (!live.follow) {
+    const c = nb.getCenter(new THREE.Vector3()), r = Math.max(nb.getSize(new THREE.Vector3()).length() * 0.5, 0.1);
+    camera.position.copy(c).add(new THREE.Vector3(r, r * 0.6, r));
+    orbit.target.copy(c); orbit.update();
+  }
+  if (why) {
+    live.nReframe = (live.nReframe || 0) + 1;
+    live.lastReframe = why;
+    const el = document.getElementById("live-msg");
+    if (!live.sticky) el.textContent = `vista re-encuadrada (${why})`;
+  }
+}
+
 function liveOnFrame(buf) {
   liveEnsureScene();
   const dv = new DataView(buf);
@@ -790,6 +1025,7 @@ function liveOnFrame(buf) {
     const pa = live.geo.attributes.position, ca = live.geo.attributes.color;
     pa.addUpdateRange(live.count * 3, take * 3); pa.needsUpdate = true;
     ca.addUpdateRange(live.count * 3, take * 3); ca.needsUpdate = true;
+    live.ranges[frameIdx] = [live.count, take];
     live.count += take;
     live.geo.setDrawRange(0, live.count);
   }
@@ -824,16 +1060,25 @@ function liveOnFrame(buf) {
   // encuadrar una sola vez, cuando ya hay geometría suficiente para estimar la escala
   if (!live.framed && live.count > 20000) {
     live.framed = true;
-    live.geo.computeBoundingBox();
     clearScene();                     // la sesión en vivo reemplaza lo que hubiera cargado
-    lastBox = live.geo.boundingBox.clone();
+    lastBox = liveRobustBox() || (live.geo.computeBoundingBox(), live.geo.boundingBox.clone());
     lastDown = live.down.clone().normalize();
     frameScene(normalizeGroup(live.group, lastBox, lastDown));
     live.points.material.size = parseFloat(document.getElementById("point-size").value);
     // tamaño del marcador: 4% de la diagonal de lo que había al encuadrar
     const diag = lastBox.getSize(new THREE.Vector3()).length();
+    live.framedDiag = diag;
     live.marker.scale.setScalar(Math.max(diag * 0.04, 1e-4));
     live.marker.visible = document.getElementById("show-cams").checked;
+  } else if (live.framed && live.frames % 8 === 0) {
+    // el mapa puede crecer mucho (deriva del streaming, recorrido largo) o resultar mucho más chico
+    // que lo que se encuadró con los primeros frames: si la escala cambió más de 2x, re-encuadrar
+    const box = liveRobustBox();
+    if (box) {
+      const d = box.getSize(new THREE.Vector3()).length();
+      const r = d / Math.max(live.framedDiag || d, 1e-9);
+      if (r > 2 || r < 0.5) liveReframe(box, r > 2 ? `el mapa creció ${r.toFixed(1)}x` : `el mapa es ${(1 / r).toFixed(1)}x más chico`, r);
+    }
   }
 }
 
@@ -891,7 +1136,8 @@ function liveConnect() {
       liveSetRunning(!!m.running);
       // "fuente agotada"/"error" son el desenlace de la sesión: no dejar que el
       // siguiente estado ("detenido") los pise antes de que se puedan leer.
-      if (!live.sticky) document.getElementById("live-msg").textContent = m.msg || "";
+      if (!live.sticky) document.getElementById("live-msg").textContent = (m.msg || "") +
+        (live.nReframe ? ` · vista re-encuadrada ${live.nReframe}x (${live.lastReframe})` : "");
       document.getElementById("live-frames").textContent = m.frames ?? 0;
       document.getElementById("live-rate").textContent = m.fps ? m.fps.toFixed(2) : "—";
       document.getElementById("live-vram").textContent = m.vram_mb ? `${m.vram_mb} MB` : "—";
@@ -899,6 +1145,20 @@ function liveConnect() {
       document.getElementById("live-ctx-row").style.display = c ? "" : "none";
       if (c) document.getElementById("live-ctx-stat").textContent =
         `${c.sent}/${c.read} enviados` + (c.synth ? `, ${c.synth} sintéticos` : "");
+    } else if (m.type === "tracking") {
+      liveOnTracking(m);
+      const el = document.getElementById("live-still");
+      if (el && m.movimiento_px !== undefined) {
+        el.textContent = m.estatico ? `quieta (${m.movimiento_px ?? 0} px) — la pose no avanza`
+                                    : (m.movimiento_px == null ? "—" : `en movimiento (${m.movimiento_px} px)`);
+        el.style.color = m.estatico ? "#ffb347" : "";
+      }
+    } else if (m.type === "repose") {
+      liveRepose(m.frame_idx, m.delta);
+    } else if (m.type === "keyframes") {
+      liveOnKeyframes(m);
+    } else if (m.type === "correccion") {
+      liveOnCorrection(m);
     } else if (m.type === "error") {
       live.sticky = true;
       document.getElementById("live-msg").textContent = "error: " + m.msg;
@@ -946,11 +1206,18 @@ document.getElementById("live-start").onclick = async () => {
       Object.assign(body, { source: "android", serial: d.serial, camera_id: d.camera_id,
                             device_label: d.model || d.label,
                             cam_size: document.getElementById("live-camres").value });
+    } else if (d.kind === "ssh") {
+      // cámara de otro equipo por SSH: la resolución pedida es la de la cámara remota
+      Object.assign(body, { source: "ssh", host: d.host, device: d.device, cam_tipo: d.tipo,
+                            device_label: d.model || d.label,
+                            cam_size: document.getElementById("live-camres").value });
     } else {
       body.device = d.index;
     }
   }
   if (body.context) body.fps = 0;      // con el analizador, el ritmo lo decide el movimiento
+  body.ros2 = document.getElementById("live-ros2").checked;
+  if (body.ros2) body.tracking_mode = document.getElementById("live-trkmode").value;
   document.getElementById("live-msg").textContent = "iniciando...";
   try {
     const r = await fetch("/api/live/start", {
@@ -966,22 +1233,28 @@ document.getElementById("live-stop").onclick = async () => {
   document.getElementById("live-msg").textContent = "deteniendo...";
   try { await fetch("/api/live/stop", { method: "POST" }); } catch (e) { /* sin servidor */ }
 };
+(async () => {
+  try {
+    const st = await (await fetch("/api/live/status")).json();
+    document.getElementById("live-ros2").checked = !!st.ros2_default;
+  } catch (e) { /* sin servidor */ }
+})();
 async function loadDevices() {
   const sel = document.getElementById("live-device");
   sel.innerHTML = "";
   const msg = document.createElement("option");
-  msg.textContent = "buscando cámaras (webcams y teléfonos por adb)..."; msg.disabled = true;
+  msg.textContent = "buscando cámaras (webcams, teléfonos por adb y equipos por SSH)..."; msg.disabled = true;
   sel.appendChild(msg);
   try {
     const r = await fetch("/api/live/devices");
-    const { devices = [], remote = [] } = await r.json();
+    const { devices = [], remote = [], ssh = [] } = await r.json();
     sel.innerHTML = "";
     const add = (group, list, empty) => {
       const g = document.createElement("optgroup"); g.label = group;
       const usable = list.filter((d) => d.usable);
-      for (const d of (usable.length ? usable : list)) {
+      for (const d of [...usable, ...list.filter((x) => !x.usable)]) {
         const o = document.createElement("option");
-        o.textContent = d.label + (d.usable ? "" : " — no entrega imagen");
+        o.textContent = d.label + (d.usable || / — /.test(d.label) ? "" : " — no entrega imagen");
         o.disabled = !d.usable;
         o.dataset.dev = JSON.stringify(d);
         g.appendChild(o);
@@ -992,7 +1265,8 @@ async function loadDevices() {
       sel.appendChild(g);
     };
     add("Cámaras remotas (celular por adb)", remote, "ningún teléfono conectado por adb");
-    add("Webcams de este equipo", devices, "ninguna webcam");
+    add("Cámaras de otros equipos (SSH: robot, vigia...)", ssh, "ningún equipo SSH con cámara alcanzable");
+    add("Cámaras de este equipo", devices, "ninguna cámara de video");
     const first = [...sel.options].find((o) => !o.disabled);
     if (first) first.selected = true;
     liveDeviceChanged();
@@ -1003,7 +1277,7 @@ async function loadDevices() {
 function liveDeviceChanged() {
   const opt = document.getElementById("live-device").selectedOptions[0];
   const d = opt && opt.dataset.dev ? JSON.parse(opt.dataset.dev) : {};
-  document.getElementById("live-camres").style.display = d.kind === "android" ? "" : "none";
+  document.getElementById("live-camres").style.display = (d.kind === "android" || d.kind === "ssh") ? "" : "none";
   // la cámara del teléfono llega en la orientación del sensor (horizontal): sostenido en
   // vertical hay que girarla 90°, porque el modelo necesita la gravedad hacia abajo
   const rot = document.getElementById("live-rot");
@@ -1039,6 +1313,7 @@ let fpsAccum = 0, fpsFrames = 0;
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
+  pollGamepad(dt);
 
   if (fps.active) {
     applyFpsLook();   // orientar primero: fpsMove toma los ejes de la cámara ya orientada
@@ -1057,3 +1332,5 @@ function animate() {
   }
 }
 animate();
+// gancho de depuración para pruebas automáticas (p. ej. simular el mando en un navegador sin pantalla)
+window.__visor = { camera, orbit, fps, readPad };

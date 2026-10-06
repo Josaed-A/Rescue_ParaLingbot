@@ -1,4 +1,4 @@
-"""Estimate temporal redundancy between consecutive frames in test_images/.
+"""Estimate temporal redundancy between consecutive frames in datos/test_images/.
 
 Pure image analysis — does NOT load LingBot-Map / GCTStream, does NOT run
 any model inference, does NOT touch demo.py. Conceptual groundwork for the
@@ -33,7 +33,7 @@ import numpy as np
 import cv2
 
 
-IMG_DIR = "test_images"
+IMG_DIR = "datos/test_images"
 GRID_N = 4  # 4x4 spatial grid
 THRESHOLDS = [15, 25, 40]  # abs-diff thresholds (0-255) for "significantly different" pixel %
 

@@ -2,7 +2,7 @@
 
 Este documento reúne las fórmulas que usa el repositorio, de punta a punta: qué predice el modelo y cómo, cómo se pasa de esas predicciones a nubes, mallas y splats, qué hace cada filtro y con qué se mide cada cosa. Cada sección dice **para qué** se usa y en qué archivo está.
 
-Los resultados medidos (números, comparaciones, decisiones) no están aquí: están en la [bitácora del README](README.md#bitácora-técnica-de-la-investigación).
+Los resultados medidos (números, comparaciones, decisiones) no están aquí: están en la [bitácora del README](../README.md#bitácora-técnica-de-la-investigación).
 
 **Índice**
 
@@ -37,7 +37,7 @@ $$
 - $T_{wc}$ (cámara → mundo, *c2w*): su columna $\mathbf t$ es el centro óptico $\mathbf c$ en el mundo.
 - $T_{cw}=T_{wc}^{-1}$ (mundo → cámara, *w2c*).
 
-**Convención del repositorio.** Lo que se guarda en `extrinsic` de cada `.npz` se trata como *w2c*, y el mundo se obtiene invirtiéndolo (`c2w = inv(E)`). Es la misma convención que usan el visor de `lingbot_map` y `demo_render`. Usarla al revés da trayectorias sin sentido (bitácora del 2026-09-17).
+**Convención del repositorio.** Lo que se guarda en `extrinsic` de cada `.npz` se trata como *w2c*, y el mundo se obtiene invirtiéndolo (`c2w = inv(E)`). Es la misma convención que usan el visor de `lingbot_map` y `src/upstream/demo_render`. Usarla al revés da trayectorias sin sentido (bitácora del 2026-09-17).
 
 **Proyección** de un punto del mundo $\mathbf X$ en la cámara $j$:
 
@@ -145,7 +145,7 @@ donde $\mathcal S$ son los frames de escala y $w$ es `kv_cache_sliding_window`. 
 
 El costo: un frame solo ve el pasado, y solo $w$ frames hacia atrás. Los errores de pose se acumulan sin corrección, que es la **deriva**. En las muestras reales el recorrido llegó a medir 2.6 veces su largo real.
 
-Es el único modo posible en vivo (`scripts_stream/live_server.py`), porque en vivo no hay futuro.
+Es el único modo posible en vivo (`src/vivo/live_server.py`), porque en vivo no hay futuro.
 
 ### 2.7 Modo windowed: ventanas solapadas y encadenadas por similaridad
 
@@ -312,7 +312,7 @@ donde $m$ es la máscara de píxeles estáticos y $\mathrm{ssim}(\mathbf u)$ es 
 
 ## 7. Análisis de frames y context-to-image
 
-**Para qué:** decidir qué frames de un video le llegan al modelo, y rellenar saltos grandes entre frames con frames intermedios generados, como "amortiguador visual". Es la idea de Paragraphica (computar según el contexto) llevada a este problema. **No hay generación de imagen por IA**: lo que se genera es una interpolación por flujo óptico. Código: `analyze_frames.py` y `curate_and_synthesize.py` (videos grabados), `scripts_stream/context_gate.py` (en vivo).
+**Para qué:** decidir qué frames de un video le llegan al modelo, y rellenar saltos grandes entre frames con frames intermedios generados, como "amortiguador visual". Es la idea de Paragraphica (computar según el contexto) llevada a este problema. **No hay generación de imagen por IA**: lo que se genera es una interpolación por flujo óptico. Código: `analyze_frames.py` y `curate_and_synthesize.py` (videos grabados), `src/vivo/context_gate.py` (en vivo).
 
 ### 7.1 Nitidez
 
@@ -359,9 +359,17 @@ Los frames sintéticos entran al modelo **solo como contexto temporal** (pose y 
 
 ---
 
+### 7.5 Momentos estáticos (en vivo)
+
+Es la misma medida de 7.3, aplicada a cada frame que entra al modelo: $A$, el movimiento acumulado desde el frame anterior del modelo. Si $A<\sigma\,\delta$ (con $\sigma=0.25$, es decir 9 px), el frame es estático y la pose que se muestra y se registra no avanza. Sean $T_k$ la pose del modelo, $\hat T_k$ la retenida y $F$ una corrección que empieza en la identidad:
+
+$$\hat T_k=\begin{cases}\hat T_{k-1}, & F\leftarrow \hat T_{k-1}T_k^{-1} \quad\text{(estático)}\\ F\,T_k & \text{(en movimiento)}\end{cases}$$
+
+Así la deriva del modelo durante la pausa ($T_k$ cambia aunque la imagen no) queda absorbida en $F$, y al reanudar los pasos relativos son los del modelo, sin salto. La profundidad del frame estático se sigue desproyectando, con $\hat T_k$. Para qué: que la cámara virtual y la pose de referencia no avancen cuando la cámara física está quieta. Dónde: `src/vivo/context_gate.py::StaticHold`.
+
 ## 8. Filtro geométrico previo a la malla y al splat
 
-**Para qué:** las predicciones por frame no son del todo consistentes entre sí. La misma pared vista en dos momentos del recorrido queda en dos lugares un poco distintos (**paredes dobles**), las personas que se mueven quedan pegadas al mapa, y en los bordes de los objetos aparecen puntos flotando. El filtro depura eso antes de construir la malla y el splat, busca la **estructura** del lugar (paredes, piso, esquinas) y arma con ella una malla simple. Código: `scripts_context/geo_filter.py`, que se aplica con `--filter` en `tsdf_mesh.py` y `gsplat_train.py`.
+**Para qué:** las predicciones por frame no son del todo consistentes entre sí. La misma pared vista en dos momentos del recorrido queda en dos lugares un poco distintos (**paredes dobles**), las personas que se mueven quedan pegadas al mapa, y en los bordes de los objetos aparecen puntos flotando. El filtro depura eso antes de construir la malla y el splat, busca la **estructura** del lugar (paredes, piso, esquinas) y arma con ella una malla simple. Código: `src/mapas/geo_filter.py`, que se aplica con `--filter` en `tsdf_mesh.py` y `gsplat_train.py`.
 
 **No modifica las predicciones del modelo ni la nube fusionada.** Escribe un archivo aparte (`<name>_filtro.npz`) que solo usan la malla y el splat filtrados.
 

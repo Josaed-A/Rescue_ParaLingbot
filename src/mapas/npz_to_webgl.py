@@ -1,5 +1,5 @@
 """Convert a --save_predictions .npz into static assets for the WebGL viewer
-(scripts_context/webgl_viewer/): a point cloud (PLY, binary little-endian) and
+(src/mapas/webgl_viewer/): a point cloud (PLY, binary little-endian) and
 a camera-path JSON (position + look direction per real frame), so the browser
 can draw the trajectory and frustums without needing viser or re-running the
 model.
@@ -17,7 +17,7 @@ Camera path convention matches the rest of the repo: the viewer inverts the
 stored extrinsic (treats it as camera-from-world), so c2w = inv(extrinsic).
 
 Usage:
-  python3 scripts_context/npz_to_webgl.py run.npz --out_dir captures/.../webgl \
+  python3 src/mapas/npz_to_webgl.py run.npz --out_dir captures/.../webgl \
       --name final_m1 --mode dense --voxel_rel 0.0004 --conf_percentile 25
 """
 import argparse
@@ -163,8 +163,18 @@ def main():
                           (np.asarray(pc.colors) * 255).astype(np.uint8))
         n_final = len(pc.points)
 
+    # etapa 16: trayectorias de los tres modos de referencia (si la sesión las tiene), en el mismo mundo
+    # que la nube; el visor las dibuja con los colores BASIC / STELLA / HYBRID
+    tray = {}
+    for key, name in (("pose_basic", "basic"), ("pose_ref_stella", "stella"), ("pose_ref_hybrid", "hybrid")):
+        if key in d.files:
+            T = d[key].astype(np.float64)
+            ok = np.isfinite(T[:, 0, 0])
+            if ok.sum() >= 2 and not (name != "basic" and np.allclose(T[ok], d["pose_basic"][ok], atol=1e-9)):
+                tray[name] = np.round(T[ok, :3, 3], 5).tolist()
     with open(cams_path, "w") as f:
-        json.dump({"npz": os.path.basename(args.npz), "n_cameras": len(cams), "cameras": cams}, f)
+        json.dump({"npz": os.path.basename(args.npz), "n_cameras": len(cams), "cameras": cams,
+                   "trayectorias": tray, "registro": str(d["referencia_registro"]) if "referencia_registro" in d.files else None}, f)
 
     with open(os.path.join(args.out_dir, f"{args.name}_{args.mode}_info.json"), "w") as f:
         json.dump({"npz": os.path.basename(args.npz), "mode": args.mode,

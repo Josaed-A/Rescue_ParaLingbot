@@ -44,7 +44,7 @@ import torch
 import torch.nn as nn
 from torch.ao.quantization import quantize_dynamic
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
 class _ProcessMemoryCountersEx(ctypes.Structure):
@@ -191,7 +191,7 @@ def compare_outputs(pred_a, pred_b, label_a, label_b):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model_path", required=True)
-    ap.add_argument("--image_folder", default="test_images")
+    ap.add_argument("--image_folder", default="datos/test_images")
     ap.add_argument("--n_images", type=int, default=3)
     ap.add_argument("--image_size", type=int, default=518)
     ap.add_argument("--patch_size", type=int, default=14)

@@ -14,7 +14,7 @@ altura de la cámara sobre el piso varió 4x entre corridas del mismo video. Las
 relativas: "end_over_max" = altura final / desnivel máximo (≈0 si el recorrido vuelve al
 nivel de partida, ≈1 si se queda arriba) y "horizontal_over_max" = largo en planta / desnivel.
 
-    python scripts_context/height_profile.py eval/mapa.npz --out_json h.json --out_png h.png
+    python src/mapas/height_profile.py eval/mapa.npz --out_json h.json --out_png h.png
 """
 import argparse
 import json

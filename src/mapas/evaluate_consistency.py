@@ -20,7 +20,7 @@ Plus trajectory smoothness (camera-centre jerk and rotation-step spikes) and
 the model's own median depth confidence.
 
 Usage:
-  python3 scripts_context/evaluate_consistency.py name=path.npz [name=path.npz ...] --out report.json
+  python3 src/mapas/evaluate_consistency.py name=path.npz [name=path.npz ...] --out report.json
 """
 import argparse
 import json

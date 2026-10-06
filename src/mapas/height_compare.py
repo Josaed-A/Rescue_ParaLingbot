@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compara varias corridas del mismo video: planta (vista desde arriba) y perfil de altura.
 
-    python scripts_context/height_compare.py --out comp.png nombre=a.npz nombre2=b.npz ...
+    python src/mapas/height_compare.py --out comp.png nombre=a.npz nombre2=b.npz ...
 """
 import argparse
 import sys

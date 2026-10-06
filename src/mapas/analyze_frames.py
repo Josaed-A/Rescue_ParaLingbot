@@ -10,7 +10,7 @@ Motion is reported in pixels at the candidate resolution (540 px wide for the
 unisabana run), measured on a half-resolution copy and scaled back.
 
 Usage:
-  python3 scripts_context/analyze_frames.py --frames_dir <dir> --out <analysis.json>
+  python3 src/mapas/analyze_frames.py --frames_dir <dir> --out <analysis.json>
 """
 import argparse
 import glob

@@ -8,9 +8,9 @@ doctor down. Linux and Windows; GPU and laptop-suspend checks are skipped where 
 don't apply.
 
 Usage:
-  python3 tools/doctor.py                          # profiles core,vis,gpu
-  python3 tools/doctor.py --profiles all
-  python3 tools/doctor.py --verify-assets          # also SHA256 the model files (~30 s)
+  python3 scripts/doctor.py                          # profiles core,vis,gpu
+  python3 scripts/doctor.py --profiles all
+  python3 scripts/doctor.py --verify-assets          # also SHA256 the model files (~30 s)
 Exit code 0 = no FALLA, 1 = something must be fixed.
 """
 import argparse
@@ -81,9 +81,9 @@ def pip_cmd(spec):
 
 def setup_cmd(profile):
     if os.name == "nt":
-        return f"ver SETUP.md (Windows), perfil {profile}"
+        return f"ver docs/SETUP.md (Windows), perfil {profile}"
     mode = "" if in_venv() else " --mode user"
-    return f"./setup_env.sh --profiles {profile}{mode}"
+    return f"scripts/setup_env.sh --profiles {profile}{mode}"
 
 
 def req_names(profile):
@@ -322,14 +322,14 @@ def check_gpu(profiles):
         report("OK", f"CUDA usable desde torch {t['torch']}: {t['free_mib']}/{t['total_mib']} MiB libres")
     else:
         fix = ("si el equipo se suspendió: sudo rmmod nvidia_uvm && sudo modprobe nvidia_uvm (o reiniciar)\n"
-               "scripts_gpu/gpu_preflight.sh muestra procesos que retienen la GPU") if sys.platform.startswith("linux") \
+               "src/gpu/gpu_preflight.sh muestra procesos que retienen la GPU") if sys.platform.startswith("linux") \
             else "reiniciar el equipo"
         report("FALLA", f"torch no puede usar CUDA: {t.get('error')}", fix)
     mem = smi["mem_mib"]
     if mem <= 8700:
         report("INFO", f"{mem} MiB de VRAM: usar los flags validados para 8 GB",
                "--use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 --offload_to_cpu"
-               "\n(+ --keep_images_on_cpu en scripts_webcam/process_and_view.py)")
+               "\n(+ --keep_images_on_cpu en src/captura/process_and_view.py)")
     else:
         report("INFO", f"{mem} MiB de VRAM: configuración no medida en este repo",
                "empezar con los flags de 8 GB y subir --kv_cache_sliding_window / --num_scale_frames mientras no haya OOM")
@@ -355,7 +355,7 @@ def check_assets(profiles, verify):
         if not set(a["profiles"]) & set(profiles):
             continue
         path = os.path.join(ROOT, a["dest"])
-        fix = f"{os.path.basename(sys.executable)} tools/fetch_assets.py --profiles {','.join(profiles)}" \
+        fix = f"{os.path.basename(sys.executable)} scripts/fetch_assets.py --profiles {','.join(profiles)}" \
               "   (--source-dir <otra copia> para no descargar)"
         if not os.path.isfile(path):
             report("FALLA", f"{a['dest']}: falta ({a['used_by']})", fix)
@@ -387,7 +387,7 @@ def find_cuda_home(major):
 
 
 def check_render(torch_info):
-    section("Render offline (demo_render/)")
+    section("Render offline (src/upstream/demo_render/)")
     ff = shutil.which("ffmpeg")
     report("OK", f"ffmpeg: {ff}") if ff else report("FALLA", "ffmpeg no está en el PATH", setup_cmd("render"))
     major = (torch_info or {}).get("cuda", "") or ""
@@ -401,7 +401,7 @@ def check_render(torch_info):
     else:
         report("FALLA", "no hay CUDA toolkit (nvcc): solo hace falta para compilar las extensiones y Kaolin",
                setup_cmd("render") + " --install-cuda-toolkit   (~4 GB, sin sudo)")
-    ext_dir = os.path.join(ROOT, "demo_render", "render_cuda_ext")
+    ext_dir = os.path.join(ROOT, "src/upstream/demo_render", "render_cuda_ext")
     tag = f"cpython-{sys.version_info[0]}{sys.version_info[1]}"
     built = [os.path.basename(p) for p in glob.glob(os.path.join(ext_dir, "*_ext*.so")) + glob.glob(os.path.join(ext_dir, "*_ext*.pyd"))]
     for mod in ("voxel_morton_ext", "frustum_cull_ext"):
@@ -431,7 +431,7 @@ def check_suspend():
         report("OK", "PreserveVideoMemoryAllocations=1: suspender no rompe CUDA")
     else:
         report("AVISO", "suspender con un proceso CUDA vivo deja CUDA inutilizable hasta reiniciar",
-               "una sola vez por equipo: sudo scripts_gpu/fix_nvidia_suspend.sh && sudo reboot")
+               "una sola vez por equipo: sudo src/gpu/fix_nvidia_suspend.sh && sudo reboot")
 
 
 def main():

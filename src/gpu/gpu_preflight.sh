@@ -4,7 +4,7 @@
 #   1) NVML driver/library mismatch after an unattended driver upgrade -> reboot
 #   2) stale viewer/inference processes holding VRAM and the viser port
 #   3) CUDA context broken after a laptop suspend/resume -> reload nvidia_uvm
-# Usage: scripts_gpu/gpu_preflight.sh [--port 8080] [--kill-stale]
+# Usage: src/gpu/gpu_preflight.sh [--port 8080] [--kill-stale]
 # Exit code 0 = ready for GPU, 1 = something must be fixed first.
 set -u
 
@@ -49,7 +49,7 @@ if [ -n "$stale" ]; then
     pgrep -f "$STALE_RE" >/dev/null && kill -9 $(pgrep -f "$STALE_RE") 2>/dev/null
     say "        Detenidos."
   else
-    say "        Detenerlos: scripts_gpu/gpu_preflight.sh --kill-stale   (o kill <PID>)"
+    say "        Detenerlos: src/gpu/gpu_preflight.sh --kill-stale   (o kill <PID>)"
     ok=0
   fi
 fi
@@ -95,7 +95,7 @@ fi
 preserve=$(awk -F': ' '/PreserveVideoMemoryAllocations/{print $2}' /proc/driver/nvidia/params 2>/dev/null)
 if [ "$preserve" != "1" ]; then
   say "[AVISO] Protección contra suspensión NO instalada (PreserveVideoMemoryAllocations=$preserve)."
-  say "        Instalar una sola vez: sudo scripts_gpu/fix_nvidia_suspend.sh && sudo reboot"
+  say "        Instalar una sola vez: sudo src/gpu/fix_nvidia_suspend.sh && sudo reboot"
 fi
 for ac in /sys/class/power_supply/A*/online; do
   [ -r "$ac" ] && [ "$(cat "$ac")" = "0" ] && say "[AVISO] Equipo en batería: conectá el cargador para corridas largas."

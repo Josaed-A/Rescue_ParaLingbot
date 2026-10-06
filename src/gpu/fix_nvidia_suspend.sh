@@ -7,7 +7,7 @@
 # reloaded. Setting it to 1 makes nvidia-suspend.service save VRAM to
 # NVreg_TemporaryFilePath and restore it on resume.
 #
-# Usage:  sudo scripts_gpu/fix_nvidia_suspend.sh && sudo reboot
+# Usage:  sudo src/gpu/fix_nvidia_suspend.sh && sudo reboot
 # Revert: sudo rm /etc/modprobe.d/nvidia-power-management.conf && sudo update-initramfs -u && sudo reboot
 set -euo pipefail
 
@@ -18,7 +18,7 @@ fi
 
 CONF=/etc/modprobe.d/nvidia-power-management.conf
 cat > "$CONF" <<'EOF'
-# Written by Rescue_ParaLingbot scripts_gpu/fix_nvidia_suspend.sh
+# Written by Rescue_ParaLingbot src/gpu/fix_nvidia_suspend.sh
 # Keep VRAM of live CUDA contexts across suspend/resume.
 options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp
 EOF

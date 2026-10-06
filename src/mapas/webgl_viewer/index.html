@@ -252,10 +252,11 @@
       <option value="180">180°</option>
       <option value="270">270°</option>
     </select>
-    <select id="live-camres" title="resolución que pide al teléfono (más alta = más Wi-Fi)">
+    <select id="live-camres" title="resolución que pide a la cámara remota (teléfono o equipo por SSH; más alta = más red)">
       <option value="1280x720">1280x720</option>
       <option value="1920x1080">1920x1080</option>
       <option value="960x540">960x540</option>
+      <option value="640x480">640x480</option>
     </select>
   </div>
   <input id="live-path" type="text" placeholder="ruta de la carpeta o del video"
@@ -279,12 +280,34 @@
         <option value="1">x1</option><option value="2">x2</option><option value="3">x3</option></select></label>
     <label title="La vista acompaña a la cámara (en tercera persona, desde atrás y arriba), con movimiento suave entre poses. Se desactiva solo al arrastrar la vista.">
       <input type="checkbox" id="live-follow" checked> seguir la cámara</label>
+    <label title="Publica los frames por ROS2 (/paralingbot/camera/image_raw, poses, TF) y arranca Stella-VSLAM con una configuración de cámara para la imagen publicada. Sin ROS2 la sesión es la de siempre.">
+      <input type="checkbox" id="live-ros2" checked> puente ROS2 + Stella
+      <select id="live-trkmode" title="Pose de referencia: BASIC = LingBot; HYBRID = pasos de Stella cuando es fiable; STELLA = Stella anclada. El mapa se dibuja siempre con BASIC.">
+        <option value="hybrid" selected>HYBRID</option><option value="basic">BASIC</option><option value="stella">STELLA</option>
+      </select></label>
   </div>
   <div class="stat"><span>frames</span><span id="live-frames">0</span></div>
   <div class="stat" id="live-ctx-row" style="display:none"><span>contexto</span><span id="live-ctx-stat">—</span></div>
   <div class="stat"><span>fps real</span><span id="live-rate">—</span></div>
+  <div class="stat" title="Movimiento entre frames del modelo (flujo óptico, la misma medida del analizador de contexto). Quieta: la pose no avanza, pero los puntos se siguen agregando."><span>cámara</span><span id="live-still">—</span></div>
   <div class="stat"><span>VRAM</span><span id="live-vram">—</span></div>
   <div class="stat"><span>puntos en el mapa</span><span id="live-points">0</span></div>
+  <!-- etapa 16: seguimiento (BASIC / STELLA / HYBRID) -->
+  <div id="trk-box" style="display:none; margin-top:6px; border-top:1px solid #444; padding-top:6px">
+    <div class="stat"><span>referencia</span><span id="trk-mode">—</span></div>
+    <div class="stat"><span>fuente usada</span><span id="trk-src" style="font-weight:bold">—</span></div>
+    <div class="stat"><span>Stella</span><span id="trk-stella">—</span></div>
+    <div class="stat"><span>ritmo Stella</span><span id="trk-rate">—</span></div>
+    <div class="stat"><span>stamp del frame</span><span id="trk-stamp">—</span></div>
+    <div class="stat"><span>latencia captura→mapa</span><span id="trk-lat">—</span></div>
+    <div class="stat"><span>correcciones (keyframes)</span><span id="trk-corr">0</span></div>
+    <div style="font-size:11px; margin-top:4px">
+      <label><input type="checkbox" id="trk-show-basic" checked> <span style="color:#bbbbbb">■</span> BASIC</label>
+      <label><input type="checkbox" id="trk-show-stella" checked> <span style="color:#ff9933">■</span> STELLA</label>
+      <label><input type="checkbox" id="trk-show-hybrid" checked> <span style="color:#33dd66">■</span> HYBRID</label>
+      <label><input type="checkbox" id="trk-show-kf" checked> <span style="color:#3399ff">●</span> keyframes</label>
+    </div>
+  </div>
   <div id="live-msg">el modelo se carga recién al iniciar</div>
 </div>
 
@@ -305,13 +328,25 @@
     <tr><td>shift</td><td>correr</td></tr>
     <tr><td>esc</td><td>soltar el mouse</td></tr>
   </table>
-  <div class="section">Control Xbox (en 1ª persona)</div>
+  <div class="section">Control Xbox — 1ª persona</div>
   <table>
     <tr><td>stick izq.</td><td>moverse</td></tr>
     <tr><td>stick der.</td><td>mirar alrededor</td></tr>
     <tr><td>RT / LT</td><td>subir / bajar</td></tr>
     <tr><td>A</td><td>correr</td></tr>
-    <tr><td>Start</td><td>cambiar órbita ↔ 1ª persona</td></tr>
+    <tr><td>RB / LB</td><td>más rápido / más lento</td></tr>
+  </table>
+  <div class="section">Control Xbox — órbita</div>
+  <table>
+    <tr><td>stick izq.</td><td>girar alrededor</td></tr>
+    <tr><td>stick der.</td><td>desplazar</td></tr>
+    <tr><td>RT / LT</td><td>acercar / alejar</td></tr>
+  </table>
+  <div class="section">Control Xbox — los dos modos</div>
+  <table>
+    <tr><td>Start (≡)</td><td>cambiar órbita ↔ 1ª persona</td></tr>
+    <tr><td>View (⧉)</td><td>volver a encuadrar el mapa</td></tr>
+    <tr><td colspan="2" style="opacity:.7">el navegador muestra el mando recién al pulsar un botón; el último usado queda recordado (✓)</td></tr>
   </table>
   </div>
 </div>

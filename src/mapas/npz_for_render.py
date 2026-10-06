@@ -1,7 +1,7 @@
-"""Convert a --save_predictions .npz into the form demo_render/batch_demo.py renders.
+"""Convert a --save_predictions .npz into the form src/upstream/demo_render/batch_demo.py renders.
 
 batch_demo.py --load_predictions reads images / depth / depth_conf / extrinsic /
-intrinsic stacked along frames (demo_render/rgbd_render/data/loader.py), which is
+intrinsic stacked along frames (src/upstream/demo_render/rgbd_render/data/loader.py), which is
 what process_and_view.py already saves — except that our file also carries the
 synthetic context frames and a few extra arrays. This drops the synthetic frames
 (they must not appear in the rendered walkthrough) and keeps only those keys, so
@@ -10,7 +10,7 @@ the GPU and then moves the model there too, which needs ~9 GB and does not fit
 on this 8 GB card.
 
 Usage:
-  python3 scripts_context/npz_for_render.py run.npz --out render_input.npz
+  python3 src/mapas/npz_for_render.py run.npz --out render_input.npz
 """
 import argparse
 

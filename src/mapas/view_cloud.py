@@ -6,7 +6,7 @@ frame, with the overlap between frames left in. This one shows the merged cloud
 question is "how much real detail is there", not "what did each frame see".
 
 Usage:
-  python3 scripts_context/view_cloud.py dense.ply [--port 8080] [--point_size 0.004]
+  python3 src/mapas/view_cloud.py dense.ply [--port 8080] [--point_size 0.004]
 """
 import argparse
 import time

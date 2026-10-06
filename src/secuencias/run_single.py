@@ -23,9 +23,9 @@ import sys
 import time
 import traceback
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from scripts_seq.monitor import MemoryMonitor  # noqa: E402
+from src.secuencias.monitor import MemoryMonitor  # noqa: E402
 
 
 def build_args(model_path):

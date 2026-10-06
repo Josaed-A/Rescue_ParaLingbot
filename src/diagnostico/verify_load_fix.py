@@ -1,7 +1,7 @@
 """Verify the del+gc.collect() fix in demo.py::load_model() against the
 2026-08-23 baseline (see README.md, "Reporte: prueba aislada de load_model()").
 
-Unlike scripts/measure_load_only.py (a standalone reimplementation of the
+Unlike src/diagnostico/measure_load_only.py (a standalone reimplementation of the
 load sequence, used to find WHERE the peak was), this script imports and
 calls the REAL demo.load_model(args, device) — so it measures the actual
 pipeline code, including the fix, not a parallel simulation. No image
@@ -23,7 +23,7 @@ from types import SimpleNamespace
 
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root, for `import demo`
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # repo root, for `import demo`
 
 
 class _ProcessMemoryCountersEx(ctypes.Structure):

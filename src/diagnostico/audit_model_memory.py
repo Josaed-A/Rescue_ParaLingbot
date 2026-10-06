@@ -37,7 +37,7 @@ from types import SimpleNamespace
 
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root, for `import demo`
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # repo root, for `import demo`
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +237,7 @@ def sum_live_tensor_bytes():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model_path", required=True)
-    ap.add_argument("--image_folder", default="test_images")
+    ap.add_argument("--image_folder", default="datos/test_images")
     ap.add_argument("--n_infer_images", type=int, default=3)
     args_cli = ap.parse_args()
 

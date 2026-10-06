@@ -5,7 +5,7 @@ Measures only the top-level model.forward() GPU time — no per-module hooks,
 no inner breakdown. One CUDA event pair per frame, a single sync at the end.
 
 Usage:
-    python gct_profile.py --backend both --dtype bf16 --num_frames 500
+    python src/diagnostico/gct_profile.py --backend both --dtype bf16 --num_frames 500
 """
 
 import argparse

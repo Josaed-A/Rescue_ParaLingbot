@@ -4,9 +4,9 @@ Mapeo 3D con una cámara RGB común para un robot de búsqueda y rescate (proyec
 
 Este repositorio investiga cómo sacarle un mapa utilizable a un video grabado caminando con un teléfono, en una GPU de 8 GB. Con dos recorridos reales de interior, comparados contra croquis dibujados a mano de la ruta que se caminó, el recorrido reconstruido pasa de medir **2.6 veces** su largo real a **1.13 veces**, y el error de forma baja de **6.44% a 4.75%** del largo de la ruta.
 
-- Instalación en un equipo nuevo: [SETUP.md](SETUP.md).
+- Instalación en un equipo nuevo: [docs/SETUP.md](docs/SETUP.md).
 - Registro completo de experimentos, mediciones y decisiones: [Bitácora técnica](#bitácora-técnica-de-la-investigación), más abajo en este mismo archivo.
-- La matemática de todo el proyecto (el modelo, la reconstrucción, los filtros y las métricas, y para qué se usa cada uno): [MATEMATICA.md](MATEMATICA.md).
+- La matemática de todo el proyecto (el modelo, la reconstrucción, los filtros y las métricas, y para qué se usa cada uno): [docs/MATEMATICA.md](docs/MATEMATICA.md).
 
 ## Lo que hay que saber antes de usarlo
 
@@ -14,7 +14,7 @@ Este repositorio investiga cómo sacarle un mapa utilizable a un video grabado c
 
 **2. Cuidado con medir solo la coherencia entre frames vecinos.** Es la trampa en la que cayó este proyecto: una capa de curación de frames ([amortiguador visual](#amortiguador-visual-context-to-image-para-video-de-baja-calidad--pruebas_realesunisabanaprueba_2-2026-09-17), inspirada en [Paragraphica](https://github.com/bjoernkarmann/Paragraphica)) subió la autoconsistencia a 1 s de 47% a 75%, y **empeoró** la forma del recorrido (de 6.44% a 11.92% de error). Un mapa puede encajar consigo mismo localmente y estar torcido de punta a punta. Ver la sección del [2026-09-19](#rutas-reales-dibujadas-a-mano--modo-windowed-la-curación-mejoraba-la-métrica-local-y-empeoraba-el-recorrido-2026-09-19).
 
-**3. La nube no es rala, está sin fusionar.** El modelo predice profundidad **por píxel** (268 k puntos por frame), no una grilla de puntos de interés. Lo que falta es fusionar el solape entre frames: `scripts_context/export_dense_cloud.py` pasa de 114.6 M de puntos crudos a 10.3 M únicos.
+**3. La nube no es rala, está sin fusionar.** El modelo predice profundidad **por píxel** (268 k puntos por frame), no una grilla de puntos de interés. Lo que falta es fusionar el solape entre frames: `src/mapas/export_dense_cloud.py` pasa de 114.6 M de puntos crudos a 10.3 M únicos.
 
 **4. Grabar en horizontal.** Un video vertical pierde ~44% de cada imagen en el recorte cuadrado del modelo. Rotarlo a horizontal después **no** sirve: el modelo necesita la gravedad hacia abajo y su confianza cae al mínimo.
 
@@ -29,9 +29,9 @@ Dos recorridos de interior en la Universidad de La Sabana, grabados con teléfon
 | Rectitud estimada / croquis | 0.588 / 0.781 | 0.773 / 0.876 |
 | Frames / nube fusionada | 657 / 10.3 M puntos | 476 / 13.8 M puntos |
 
-Además de la nube, se genera el video de recorrido completo con el renderizador del repositorio original (`demo_render/batch_demo.py`), con el video real y la reconstrucción lado a lado.
+Además de la nube, se genera el video de recorrido completo con el renderizador del repositorio original (`src/upstream/demo_render/batch_demo.py`), con el video real y la reconstrucción lado a lado.
 
-**Reconstrucción fotorrealista (Gaussian Splatting).** Con las imágenes y poses del modelo se entrena un splat por prueba (`scripts_context/gsplat_train.py`, ~5 min en la misma GPU). Medido sobre 1 de cada 8 frames que **no** se usaron para construir nada:
+**Reconstrucción fotorrealista (Gaussian Splatting).** Con las imágenes y poses del modelo se entrena un splat por prueba (`src/mapas/gsplat_train.py`, ~5 min en la misma GPU). Medido sobre 1 de cada 8 frames que **no** se usaron para construir nada:
 
 | | Muestra 1 | Muestra 2 | Prueba 4 (desnivel) |
 |---|---|---|---|
@@ -42,10 +42,10 @@ En imagen el splat gana por 6-7 dB. En geometría no hay un ganador estable entr
 
 ## Uso
 
-Requisitos: Linux, Python 3.10 a 3.13 y, opcionalmente, una GPU NVIDIA. La instalación completa, con el checkpoint `checkpoints/lingbot-map.pt`, está en [SETUP.md](SETUP.md):
+Requisitos: Linux, Python 3.10 a 3.13 y, opcionalmente, una GPU NVIDIA. La instalación completa, con el checkpoint `checkpoints/lingbot-map.pt`, está en [docs/SETUP.md](docs/SETUP.md):
 
 ```bash
-./setup_env.sh && source .venv/bin/activate && python tools/doctor.py
+scripts/setup_env.sh && source .venv/bin/activate && python scripts/doctor.py
 ```
 
 Mapear un sitio nuevo a partir de un video, siguiendo la convención `captures/pruebas_reales/<sitio>/prueba_N/`:
@@ -60,14 +60,14 @@ ffmpeg -i $P/source/video.mp4 -start_number 0 $P/candidates_full/%06d.png
 ffmpeg -i $P/source/video.mp4 -vf scale=540:-2 -start_number 0 $P/candidates/%06d.png
 
 # 2. Analizador de contexto: nitidez y movimiento de cada frame
-python scripts_context/analyze_frames.py --frames_dir $P/candidates --out $P/analysis.json
+python src/mapas/analyze_frames.py --frames_dir $P/candidates --out $P/analysis.json
 
 # 3. Cadencia uniforme (~10 fps), quedándose con el frame más nítido de cada tramo
-python scripts_context/curate_and_synthesize.py --analysis $P/analysis.json \
+python src/mapas/curate_and_synthesize.py --analysis $P/analysis.json \
     --frames_dir $P/candidates_full --out_dir $P --spacing time --stride 3 --no_synth
 
 # 4. Mapa, en modo windowed
-scripts_gpu/run_gpu.sh -- python scripts_webcam/process_and_view.py \
+src/gpu/run_gpu.sh -- python src/captura/process_and_view.py \
     --image_folder $P/frames --model_path checkpoints/lingbot-map.pt \
     --mode windowed --window_size 16 \
     --use_sdpa --num_scale_frames 2 --kv_cache_sliding_window 16 --camera_num_iterations 4 \
@@ -76,14 +76,14 @@ scripts_gpu/run_gpu.sh -- python scripts_webcam/process_and_view.py \
 
 # 5. Todos los mapas de la prueba: nube, alta densidad, cruda + trayectoria, malla TSDF,
 #    Gaussian Splatting y video del recorrido (cada uno en su carpeta de exports/)
-python scripts_context/build_maps.py $P --npz eval/mapa.npz --tasks nube,alta,cruda,malla,splat,video
+python src/mapas/build_maps.py $P --npz eval/mapa.npz --tasks nube,alta,cruda,malla,splat,video
 
 # 5b. Opcional: filtro geométrico (semántica, consistencia multivista, paredes y piso por planos)
 #     -> malla estructural simple, y malla y splat filtrados (sin personas, paredes planas)
-python scripts_context/build_maps.py $P --npz eval/mapa.npz --tasks filtro,malla_f,splat_f
+python src/mapas/build_maps.py $P --npz eval/mapa.npz --tasks filtro,malla_f,splat_f
 
 # 6. Visor: explorador de pruebas, órbita o primera persona
-scripts_context/webgl_viewer/launch.py          # http://localhost:8090
+src/mapas/webgl_viewer/launch.py          # http://localhost:8090
 ```
 
 Los pasos 5 y 6 también se hacen desde el visor: cada prueba tiene **⚙ construir mapas**,
@@ -95,7 +95,7 @@ navegable mientras crece. El modelo se carga sólo al iniciar la sesión. **Al t
 sesión queda guardada** como prueba "sin guardar" (mismo formato que el resto): se le pone
 nombre, zona y categorías, y se le construyen los mapas, incluido el reproceso en
 `windowed` que corrige la deriva del streaming.
-Detalle y límites en [scripts_stream/README.md](scripts_stream/README.md).
+Detalle y límites en [src/vivo/README.md](src/vivo/README.md).
 
 El visor queda en `http://localhost:8090`, con un **explorador de pruebas** (agrupar por
 zona, categoría, carpeta o fecha; editar título, zona, categorías y notas; ver los archivos
@@ -104,7 +104,7 @@ Splatting) y dos modos de navegación: **órbita** (arrastrar, rueda, clic derec
 anterior) y **primera persona** (`WASD` + mouse capturado, `Espacio`/`Ctrl` para subir y
 bajar, `Shift` para correr), que además funciona con un **control de Xbox** (stick
 izquierdo mueve, stick derecho mira, `RT`/`LT` suben y bajan, `Start` alterna modos).
-Detalle en [scripts_context/webgl_viewer/README.md](scripts_context/webgl_viewer/README.md).
+Detalle en [src/mapas/webgl_viewer/README.md](src/mapas/webgl_viewer/README.md).
 El visor viejo (`view_cloud.py` / `view_npz.py`, un proceso por archivo) sigue funcionando.
 
 Opciones útiles:
@@ -120,33 +120,37 @@ Opciones útiles:
 Comparar contra un croquis de la ruta real, y generar el video de recorrido completo:
 
 ```bash
-python scripts_context/compare_route.py --npz $P/eval/mapa.npz --sketch ruta.jpeg \
+python src/mapas/compare_route.py --npz $P/eval/mapa.npz --sketch ruta.jpeg \
     --out_json $P/eval/ruta.json --out_png $P/eval/ruta.png
-python scripts_context/npz_for_render.py $P/eval/mapa.npz --out $P/exports/render_in.npz
-scripts_gpu/run_gpu.sh -- python scripts_context/render_route.py \
+python src/mapas/npz_for_render.py $P/eval/mapa.npz --out $P/exports/render_in.npz
+src/gpu/run_gpu.sh -- python src/mapas/render_route.py \
     --load_predictions $P/exports/render_in.npz --output_folder $P/exports --downsample_factor 5
 ```
 
-Los flags de memoria son los validados para 8 GB de VRAM; `tools/doctor.py` indica cuáles usar según la GPU. Sin GPU, anteponer `CUDA_VISIBLE_DEVICES=""` y quitar `run_gpu.sh` (bastante más lento).
+Los flags de memoria son los validados para 8 GB de VRAM; `scripts/doctor.py` indica cuáles usar según la GPU. Sin GPU, anteponer `CUDA_VISIBLE_DEVICES=""` y quitar `run_gpu.sh` (bastante más lento).
 
 ## Estructura del repositorio
 
+Ordenada como GARDIAN (`src/`, `scripts/`, `docs/`, `test/`) desde el 2026-10-05. Las secciones viejas de la bitácora usan las rutas anteriores: la tabla de equivalencias está en [docs/ESTRUCTURA.md](docs/ESTRUCTURA.md).
+
 | Ruta | Contenido |
 |---|---|
-| `lingbot_map/`, `demo.py` | Modelo y demo de LingBot-Map (upstream, con arreglos puntuales de carga y compatibilidad) |
-| `scripts_context/` | Analizador y curación de frames, comparación contra la ruta real, nube densa, visores, renderizador de recorrido |
-| `scripts_context/webgl_viewer/` | Visor local: explorador de pruebas, splats, primera persona, control Xbox, panel de mapeo en vivo |
-| `scripts_context/build_maps.py`, `tsdf_mesh.py`, `gsplat_train.py` | Construcción de mapas por prueba: nubes, malla TSDF, Gaussian Splatting, video |
-| `scripts_context/geo_filter.py` | Filtro geométrico previo a la malla y al splat: SegFormer, consistencia multivista, planos, esquinas, malla estructural |
-| `scripts_stream/` | Servidor único del visor + mapeo en vivo por WebSocket + guardado de sesiones y trabajos de construcción |
-| `scripts_stream/android_camera.py` | Cámara de un celular Android por adb (scrcpy-server de `cel-en-rescue` + ffmpeg) como fuente del mapeo en vivo |
-| `scripts_stream/context_gate.py` | Analizador de contexto (movimiento, nitidez, frames intermedios) para el vivo y para videos |
-| `scripts_webcam/` | Captura con webcam y `process_and_view.py` (mapeo, streaming o windowed, export `.glb` y `.npz`) |
-| `scripts_gpu/` | Chequeo previo de GPU, lanzador que bloquea la suspensión, arreglo de suspensión del driver, baseline de VRAM |
-| `scripts_seq/`, `scripts/` | Instrumentación de las campañas de memoria y tiempo (Linux y Windows) |
-| `env/`, `setup_env.sh`, `tools/` | Instalación reproducible: versiones fijas, perfiles, descarga verificada de modelos, diagnóstico |
-| `demo_render/`, `benchmark/` | Renderizador MP4 offline y benchmark del upstream |
-| `captures/` | Pruebas y resultados locales (fuera de git) |
+| `lingbot_map/`, `demo.py` | Modelo y demo de LingBot-Map (upstream, con arreglos puntuales de carga y compatibilidad). Quedan en la raíz: `import demo` y el enlace del paquete dependen de eso |
+| `src/vivo/` | Servidor único del visor + mapeo en vivo por WebSocket, fuentes de cámara (webcam, celular por adb, URL, video), analizador de contexto, tracking (BASIC / STELLA / HYBRID), puente ROS2, buffer de poses, marcos de coordenadas, mapa re-registrable |
+| `src/mapas/` | Curación de frames, comparación contra la ruta real, nube densa, malla TSDF, Gaussian Splatting, filtro geométrico, `build_maps.py`, registro con la pose de referencia, comparación de trayectorias, benchmark y escala de Stella |
+| `src/mapas/webgl_viewer/` | Visor local: explorador de pruebas, splats, primera persona, control Xbox, panel de mapeo en vivo y de seguimiento |
+| `src/ros/` | Stella-VSLAM por ROS2: publicador de cámara, lanzador de Stella y sus configs, grabador, pruebas aisladas, benchmark, monitor de recursos, verificación de TF |
+| `src/captura/` | Captura con webcam y `process_and_view.py` (mapeo streaming o windowed, export `.glb` y `.npz`) |
+| `src/gpu/` | Chequeo previo de GPU, lanzador que bloquea la suspensión, aislamiento de memoria, arreglo de suspensión del driver |
+| `src/secuencias/`, `src/diagnostico/` | Instrumentación de las campañas de memoria y tiempo (Linux y Windows) |
+| `src/upstream/` | `src/upstream/demo_render/` (renderizador MP4 offline), `benchmark/` y `preprocess/` del repositorio original |
+| `scripts/` | Instalación y mantenimiento: `setup_env.sh`, `doctor.py`, `fetch_assets.py`, `reorganizar_repo.py` |
+| `env/` | Versiones fijas, perfiles de instalación y descripción de los modelos |
+| `test/` | Pruebas unitarias (`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test`) |
+| `docs/` | Instalación (SETUP), matemática, integración Stella, marcos de coordenadas, benchmark de tracking, estructura |
+| `datos/` | Escenas de ejemplo del upstream, imágenes de prueba, assets |
+| `registros/` | Salidas de las campañas viejas (resultados, logs y CSV que estaban en la raíz) |
+| `captures/`, `checkpoints/`, `logs/` | Pruebas, modelos y logs locales (fuera de git) |
 
 ## Limitaciones
 
@@ -156,7 +160,7 @@ Los flags de memoria son los validados para 8 GB de VRAM; `tools/doctor.py` indi
 - El analizador de contexto (elegir frames por movimiento y nitidez, con frames intermedios opcionales) mejora los recorridos lentos y empeora los rápidos ([2026-10-04](#filtro-geométrico-previo-a-la-malla-y-al-splat-malla-estructural-analizador-de-contexto-en-vivo-y-la-matemática-del-proyecto-2026-10-04)). Está activado en vivo y es opcional en videos; la configuración recomendada para videos sigue siendo la cadencia uniforme.
 - El filtro geométrico necesita revisitas y paredes planas: en pasillos largos con deriva residual la estructura queda incompleta.
 - No se usaron APIs de generación de imagen (no hay claves configuradas) ni refinamiento con modelos de difusión.
-- **Memoria:** los trabajos pesados (mapas, splats, mapeo en vivo) pueden pedir 8-11 GB de RAM. Lanzados desde una terminal de VS Code, si agotan la memoria systemd-oomd cierra VS Code entero; por eso `run_gpu.sh`, el visor y "construir mapas" los corren aislados con `scripts_gpu/run_isolated.sh`. El swap de esta máquina es de 2 GB.
+- **Memoria:** los trabajos pesados (mapas, splats, mapeo en vivo) pueden pedir 8-11 GB de RAM. Lanzados desde una terminal de VS Code, si agotan la memoria systemd-oomd cierra VS Code entero; por eso `run_gpu.sh`, el visor y "construir mapas" los corren aislados con `src/gpu/run_isolated.sh`. El swap de esta máquina es de 2 GB.
 
 ## Créditos
 
@@ -245,6 +249,26 @@ Ver la sección "Amortiguador visual más fuerte" al final de la bitácora.
 **Actualización 2026-10-04, noche (más reciente): cámara del celular en el mapeo en vivo.** La cámara de un teléfono Android conectado por adb (con el `scrcpy-server` de `cel-en-rescue`, sin instalar nada en el teléfono) es ahora una fuente del mapeo en vivo, elegible en el panel junto a las webcams; también hay una fuente de cámara IP por URL. Funciona a 1.7-2.2 frames/s. El teléfono entrega siempre la imagen horizontal: con el celular en vertical hay que girarla 90° (el panel lo pone por defecto). Ver la sección "Cámara de un celular como fuente del mapeo en vivo" al final de la bitácora.
 
 **Continuación (más reciente): vista del vivo más fluida.** El video de referencia ya no espera al modelo: sale de la cámara a ~13-15 imágenes/s (antes ~2), y un marcador de la cámara actual con "seguir la cámara" hace que la vista acompañe al teléfono sin saltos. Una GUI nativa local no transmitiría mejor: el WebSocket no es el cuello, el modelo sí (~2 frames/s). Ver la sección "Vista del mapeo en vivo más fluida" al final de la bitácora.
+
+**Actualización 2026-10-04, noche (más reciente): arranca la integración Stella-VSLAM + ROS2 Jazzy.** Auditoría completa en `docs/STELLA_INTEGRATION_AUDIT.md` (el "tracking actual" es la cabeza de cámara del modelo; no había timestamps en todo el pipeline; `extrinsic` guardado es w2c; Stella no está instalada en la máquina) y etapa 1 hecha: cada frame viaja con su hora de captura e identificador (`FrameMeta`) desde la fuente hasta el modelo pasando por el analizador de contexto, y la pose del modelo se expone como `BasicTrackingProvider` (`scripts_stream/tracking.py`), se graba en el `.npz` y sale por el WebSocket como mensaje `tracking`. Baseline verificado bit a bit idéntico. Ver `docs/STELLA_INTEGRATION.md` y la sección "Integración Stella-VSLAM: auditoría y etapa 1" al final de la bitácora.
+
+**Continuación (más reciente): etapa 2, Stella compilada y medida.** Stella-VSLAM compilada en `~/Rescue/stella_ws` (sin sudo), conectada por ROS2 a la misma fuente de frames de ParaLingbot (`scripts_ros/`), y medida en los tres videos de `unisabana`: inicializa en menos de 1 s y relocaliza al volver a un lugar visto, pero pierde el tracking con desenfoque y no trackea nada en la caminata rápida de los pasillos. Regla 3 confirmada: Stella no es mejor por defecto. Ver la sección "Integración Stella-VSLAM, etapa 2" al final de la bitácora.
+
+**Continuación (más reciente): etapa 3, puente ROS2 en el servidor en vivo.** `scripts_stream/ros2_bridge.py` publica cada frame capturado por ROS2 y recibe las poses de Stella como `TrackingEstimate`, grabadas junto a las BASIC (bandera `ros2`; apagada, todo es bit a bit igual). Modo `realtime` para reproducir grabaciones como una cámara. Medido: la asociación por stamp exacto solo cubre 9 de 41 frames; a 200 ms los cubre todos → la etapa 5 es necesaria. Corregido de paso: el servidor retenía 12 GB de RAM tras las sesiones (`malloc_trim`). Ver la sección "Integración Stella-VSLAM, etapa 3" al final de la bitácora.
+
+**Continuación (más reciente): etapa 4, comparación BASIC frente a Stella.** Corregido el reloj de los videos de tasa variable (PTS). Con CPU propia, Stella coincide con LingBot windowed mejor que el streaming: ATE 1.3-1.6% frente a 1.9-2.8%; en escaleras el streaming acumula error de rotación 3.4 veces más rápido. La escala relativa varía un 12-21%: Sim(3) por ventana. Hallazgo principal: Stella en vivo, compartiendo la máquina con LingBot, rinde una fracción de lo que rinde aislada. Ver `docs/TRACKING_BENCHMARK.md` y la sección "Integración Stella-VSLAM, etapa 4" al final de la bitácora.
+
+**Continuación (más reciente): etapa 5, buffer temporal de poses.** `scripts_stream/pose_buffer.py` da la pose de cada fuente en cualquier instante (lineal + SLERP, sin cruzar mapas ni extrapolar). La tolerancia de 0.25 s salió de medir el error de interpolación en trayectorias reales. En vivo, la pose de Stella para los frames de LingBot pasa de 4 a 13 de 20 en el tramo trackeado. De paso se corrigieron un `NaN` en el WebSocket, un Stella huérfano cuando la sesión falla y el servidor que no terminaba con SIGTERM. Ver la sección "Integración Stella-VSLAM, etapa 5" al final de la bitácora.
+
+**Continuación (más reciente): etapa 6, selector BASIC / STELLA / HYBRID, y corrección de la etapa 4.** El selector funciona en vivo y degrada a BASIC cuando Stella falta o está famélica. La conclusión de la etapa 4 de que Stella coincidía mejor con windowed estaba sesgada por el tramo. Contra referencias independientes, la mejora de HYBRID no está demostrada: ±0.1 puntos contra el croquis. El único indicio a favor es el cierre de escaleras por relocalización, de 4.16% a 1.57% en HYBRID y 0.99% en STELLA, en una sola secuencia. BASIC sigue por defecto. Ver la sección "Integración Stella-VSLAM, etapa 6" al final de la bitácora.
+
+**Continuación (más reciente): etapas 7 y 8.** La fusión avanzada se estudió y no se implementó por falta de evidencia. Los marcos de coordenadas quedaron definidos (`docs/COORDINATE_FRAMES.md`), publicados como TF2 REP-105 y verificados en vivo contra las poses grabadas. La Sim(3) con Stella va por un topic propio para no esconder la escala. Ver la sección "Integración Stella-VSLAM, etapas 7 y 8" al final de la bitácora.
+
+**Continuación (más reciente): etapas 9 a 19 de la integración Stella.** Escala (Sim(3) por ventana), geometría registrada con la pose de referencia, correcciones de Stella sobre la geometría histórica, TSDF y splat sobre el mapa registrado, filtro de cielo, visor con las tres trayectorias, benchmark con matriz de 15 pruebas y una optimización medida del puente ROS2. Stella en vivo no mejora la geometría de LingBot en estos videos; BASIC sigue por defecto. Ver la sección "Integración Stella-VSLAM, etapas 9 a 19" al final de la bitácora.
+
+**Continuación (más reciente): repo reorganizado como GARDIAN** (`src/`, `scripts/`, `docs/`, `test/`, `datos/`, `registros/`). Las secciones anteriores usan las rutas viejas; equivalencias en `docs/ESTRUCTURA.md`. Ver la sección "Repo reorganizado con la estructura de GARDIAN" al final de la bitácora.
+
+**Continuación (más reciente): visor con re-encuadre en vivo, mando Xbox recordado y cámaras de otros equipos por SSH.** Ver la sección del 2026-10-05 sobre el visor al final de la bitácora.
 
 **Pendiente de decisión del usuario:** implementar el driver de captura de webcam en vivo (análisis ya hecho, nada implementado todavía), decidir si mitigar el techo de VRAM de la GPU antes de ese experimento (dado que a ~4 FPS el mismo OOM se alcanzaría en ~9 segundos de captura continua), continuar la campaña secuencial en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o recién ahí empezar la integración/optimización con Paragraphica.
 
@@ -3043,6 +3067,238 @@ Una GUI nativa solo se ahorraría codificar y decodificar el JPEG, que son milis
 - La fluidez en un navegador con GPU no se midió; solo se midió lo que sale del servidor.
 - En una captura del navegador headless la vista del video apareció cortada en franjas de escenas distintas. Los frames guardados de esa misma sesión están limpios; no se pudo reproducir ni explicar.
 - El mapa sigue creciendo al ritmo del modelo (~2 frames/s). Eso no cambia con la interfaz.
+
+## Integración Stella-VSLAM: auditoría y etapa 1, tiempo e identidad de cada frame (2026-10-04, noche)
+
+**Pedido del usuario:** incorporar Stella-VSLAM y ROS2 Jazzy como refuerzo del seguimiento (trayectoria, relocalización, loop closure) en una arquitectura híbrida BASIC / STELLA / HYBRID, sin reemplazar LingBot-Map ni el seguimiento actual, comparando antes de fusionar y preservando siempre el baseline. Primero una auditoría completa sin tocar código; después, por etapas comprobables.
+
+### Auditoría (`docs/STELLA_INTEGRATION_AUDIT.md`)
+
+Lo que había que saber y no era obvio:
+
+- **El "tracking actual" es la cabeza de cámara del modelo.** No hay módulo de seguimiento aparte: la pose (9 números por frame, 4 iteraciones de refinamiento, causal) sale del mismo forward que la profundidad. No existe estado válido/perdido ni confianza de pose. Las señales observables reales son `depth_conf`, el movimiento en píxeles y la nitidez del analizador de contexto, y la suavidad de la trayectoria (`evaluate_consistency.py`).
+- **No había timestamps en ningún punto** del pipeline en vivo, y el analizador puede elegir un frame anterior al último leído. Sin hora de captura no hay asociación posible con otro tracker.
+- **Convención:** `extrinsic` guardado es w2c y todos los consumidores lo invierten (MATEMATICA.md § 1); los nombres en `demo.py` y `live_server.py` dicen lo contrario de lo que hacen. El frame 0 de cada sesión es la identidad (verificado). Unidades del modelo, no metros: la alineación con Stella es Sim(3) como hipótesis de partida.
+- **Stella no está instalada.** `~/Rescue/stella_vslam_ros` está clonado sin submódulos; faltan `stella_vslam`, g2o, FBoW, el vocabulario y `cv_bridge` en el ROS2 Jazzy compilado en `~/ros2_jazzy`. El `python3` del sistema importa a la vez `torch` con CUDA y `rclpy`.
+- **Punto de integración elegido:** un "tee" en `FrameSource`: la cámara se abre una vez, cada frame se publica en ROS2 con su stamp, LingBot sigue consumiendo en proceso y Stella consume por ROS2. Stella corre como proceso C++ aparte; LingBot no cambia: la pose de referencia entra después del modelo, al desproyectar.
+- La carpeta `docs/` estaba en `.gitignore`; se quitó para que la documentación de la integración viaje con el repo.
+
+### Etapa 1: cada frame con su hora y su identidad; el tracking actual con una interfaz
+
+Nuevo `scripts_stream/tracking.py`: `FrameMeta` (stamp, `frame_id`, sintético, movimiento, nitidez), `TrackingEstimate` (stamp, `frame_id`, c2w, fuente, estado, confianza) y `BasicTrackingProvider`, que envuelve la pose que el modelo ya emite, con estado `TRACKING` siempre que hubo pose y, como confianza, solo señales que ya existían (media y mediana de `depth_conf` del frame, movimiento y nitidez del analizador, desplazamiento respecto a la estimación anterior). El meta viaja pegado a la imagen desde `FrameSource.read()` (hora al recibir el frame en webcam, URL y celular; `índice / fps nominal` desde 0 en carpeta y video) hasta `run_model`, pasando por `ContextGate.feed`, que ahora devuelve `(rgb, sintético, meta)` con el meta del frame **elegido** y stamps interpolados en los sintéticos. Por cada frame real sale un mensaje de texto `tracking` por el WebSocket (el binario no cambia; el visor ignora los tipos que no conoce) y el `.npz` gana `stamps`, `frame_ids`, `stamp_kind`, `pose_basic`, `extrinsic_basic`, `pose_source`, `track_conf_basic`, `track_motion_px`, `track_sharpness`. `LiveSession.estimate_sinks` es el enganche para el puente ROS2 de la etapa 3.
+
+**Verificación del baseline.** `replay_live.py` sobre los primeros 60 frames de `unisabana/prueba_3`, antes y después, sin y con analizador:
+
+| | antes | después |
+|---|---|---|
+| `extrinsic`, `intrinsic`, `depth`, `depth_conf`, `images` | — | **idénticos bit a bit** (60 y 37 frames) |
+| velocidad / VRAM pico | 1.98 frames/s / 6231 MB | 2.00 frames/s / 6231 MB |
+| stamps con analizador | — | `0.0, 0.2, 0.4, 0.6, 0.7, …` (`frame_ids 0, 2, 4, 6, 7, …`: se ve qué frames eligió) |
+
+Siete pruebas unitarias en CPU (`scripts_stream/tests/test_tracking_etapa1.py`; correr con `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`, el `pytest` 6.2.5 del sistema choca con el plugin de `anyio` de `~/.local`). Los consumidores existentes (`npz_to_webgl.py`, `evaluate_consistency.py`, el catálogo del explorador) leen el `.npz` nuevo sin cambios. Una sesión de 8 frames sin grabar emitió 8 mensajes `tracking` y el sink recibió las 8 estimaciones.
+
+### Limitaciones
+
+- El stamp de las cámaras en vivo se toma al recibir el frame en el PC, no en el sensor: es un sesgo común a los dos trackers, así que no afecta la asociación entre ellos, pero sí a una fusión futura con IMU u odometría.
+- Los stamps sintéticos empiezan en 0; al publicar carpetas por ROS2 (etapa 2) habrá que decidir si conviene un origen absoluto.
+- El visor todavía no muestra la estimación (etapa 16).
+- Nada de Stella corre todavía: la etapa 2 (compilar `stella_vslam`, sus dependencias y `cv_bridge` en un workspace propio, calibrar las cámaras, medir) es la siguiente.
+
+## Integración Stella-VSLAM, etapa 2: Stella compilada, conectada por ROS2 y medida en los videos (2026-10-04, noche, continuación)
+
+**Pedido del usuario:** reiniciar el visor con el código de la etapa 1 y seguir con la etapa 2 (Stella aislado).
+
+### Instalación
+
+Todo en `~/Rescue/stella_ws`, sin sudo y sin tocar `~/ros2_jazzy`: g2o 20230223_git, FBoW (stella-cv), stella_vslam 0.7.0 en un prefix propio; `cv_bridge` (vision_opencv 4.1.0, sin Python) y `stella_vslam_ros` con colcon. Tres trampas de Jazzy en Ubuntu 22.04, todas resueltas sin tocar fuentes de terceros salvo el fork del nodo: (1) ROS2 trae su **propio yaml-cpp 0.8** y Stella enlazaba el 0.7 del sistema (dos yaml-cpp en un proceso) → un shim de CMake inyectado con `-DCMAKE_PROJECT_<proyecto>_INCLUDE` fuerza el de ROS2; (2) `ament_export_targets` ya registra el hook de `LIBRARY_PATH` y el CMake del nodo lo duplicaba; (3) `cv_bridge.h` pasó a `.hpp`. Al nodo (`~/Rescue/stella_vslam_ros`, 28 líneas) se le añadió la publicación del **estado del tracker** (`Initializing` / `Tracking` / `Lost`), porque la pose solo se publica cuando el tracking tiene éxito y el silencio no es un estado. Detalle y tabla de problemas en `docs/STELLA_INTEGRATION.md` § 2a.
+
+### Herramientas (`scripts_ros/`, nuevo)
+
+`camera_publisher.py` publica cualquier `FrameSource` de ParaLingbot (carpeta, video, webcam, URL, celular) como `sensor_msgs/Image` + `CameraInfo` con el stamp del `FrameMeta` de la etapa 1, sin cv_bridge; `run_stella.sh` lanza Stella sin visor escuchando `/paralingbot/camera/image_raw`; `record_stella.py` graba poses, estados y keyframes; `stella_offline_test.sh` arma una prueba reproducible; `stella_report.py` saca las métricas y convierte la trayectoria a la convención CV del repo (`T_cv = R⁻¹·T_ros·R`). Configs de Stella en `scripts_ros/stella/` con **intrínsecos estimados desde el FoV que predice LingBot** (sin calibrar todavía).
+
+### Medición (videos de `unisabana`, rotados y reescalados a 540x960, 30 fps)
+
+| | fablab (lenta) | pasillos (rápida) | escaleras (ida y vuelta) |
+|---|---|---|---|
+| Inicializa | 0.5-0.9 s | **nunca** (y desde el s 20: a los 30 s, y se resetea) | 0.36 s |
+| Frames en Tracking | 47% (81% en los primeros 30 s) | 0% | 17% |
+| Pérdida | a los 22 s, por desenfoque al girar a una pared blanca; no recupera | — | a los 11.5 s, frame borroso al subir; **relocaliza a los 72 s al volver a la entrada** |
+| Keyframes | 50 | 0 | 49 |
+| Tracking por frame (CPU) | 17 ms mediana, 25 ms p90 | 14 / 19 ms | 15 / 29 ms |
+
+Stella procesa el 60-70% de los frames publicados a 30 fps por la cola de profundidad 1 del nodo, no por costo: podría ir a más de 50 fps. A 15 fps (la cadencia del celular) trackea **peor**. Las poses llevan el stamp exacto de la imagen: el 100% se asoció a su frame sin interpolar.
+
+### Lectura
+
+- Stella inicializa rápido y da trayectorias continuas cuando la imagen es nítida, y **relocaliza** cuando se vuelve a un lugar visto. Pero **pierde el tracking con desenfoque** y, como la caminata sigue hacia zonas nuevas, se queda perdida 25-60 s: la relocalización monocular solo funciona en lugares ya mapeados. En la caminata rápida de los pasillos (muy borrosa) no trackea nada, mientras que LingBot sí dio un recorrido con 4.75% de error de forma. **Regla 3 confirmada: Stella no es mejor por defecto.**
+- Para el modo HYBRID: BASIC tiene que ser el portador en tramos largos; hará falta una política de **reinicio de Stella** tras N segundos perdido (submapa nuevo, realineado por Sim(3)) en vez de esperar una relocalización que puede no llegar. La nitidez y el movimiento que ya mide `ContextGate` predicen las pérdidas de Stella: sirven como señales de la lógica híbrida sin inventar métricas.
+
+### Limitaciones
+
+- Intrínsecos estimados, sin calibración con patrón. Sin prueba en vivo con alguien caminando (la cámara estática no inicializa un SLAM monocular). No se probó Stella sobre el recorte de 518 que ve LingBot. Artefactos de las corridas en `captures/stella/etapa2_2026-10-04/`.
+- Una corrida se descartó porque un `run_slam` huérfano de la prueba anterior siguió publicando en los mismos topics; el script de prueba ahora cierra el proceso real y se niega a arrancar si ya hay uno.
+
+## Integración Stella-VSLAM, etapa 3: puente ROS2 dentro del servidor en vivo (2026-10-04, noche, continuación)
+
+**Pedido del usuario:** continuar con la siguiente etapa.
+
+**Qué cambió.** `scripts_stream/ros2_bridge.py` (nuevo): un nodo rclpy en un hilo del servidor que (1) publica por ROS2 **cada frame capturado** por `FrameSource` (webcam, URL, celular, carpeta, video) con su hora de captura, y (2) recibe las poses, keyframes y estado de Stella y los convierte en `TrackingEstimate` en la convención del repo, asociados al frame del modelo por stamp exacto. Puede además arrancar y cerrar Stella (`StellaProcess`, SIGINT al grupo de procesos para que llegue al `run_slam` hijo). Todo detrás de la bandera `ros2` del POST de arranque y de `replay_live.py --ros2`; apagada, el servidor es bit a bit el de antes (verificado con la repetición de 60 frames). La geometría se sigue registrando con la pose BASIC: por ahora **solo se graban las dos poses** (`pose_stella`, `stella_status`, `stella_traj_*` en el `.npz`; `stella` en el mensaje `tracking` del WebSocket).
+
+**Modo "realtime" para grabaciones.** Un video o carpeta puede reproducirse a su fps nominal por un hilo propio, "último gana", como una cámara: el modelo toma ~2 de cada 15-30 frames y Stella recibe todos. Es la forma de que una grabación reproduzca lo que pasa en vivo, y la base de la comparación de la etapa 4. La reproducción arranca cuando el modelo ya está cargado.
+
+**Medición (video fablab en tiempo real, Stella y LingBot en la misma máquina).** Publicando los 29 fps, Stella solo procesó el 24% de los frames; publicando 1 de cada 2 (15 fps, la cadencia real del celular) el 54%, con 176 poses y 54 keyframes. De los 41 frames del modelo dentro del tramo que Stella trackeó, solo 9 tienen una pose de Stella del **mismo** frame, pero 37 tienen una a menos de 70 ms y los 41 a menos de 200 ms: **la asociación exacta no alcanza cuando los dos trackers consumen subconjuntos distintos de la cámara; la etapa 5 (buffer de poses con vecino más cercano e interpolación lineal + SLERP) es necesaria.** Artefactos en `captures/stella/etapa3_2026-10-04/`.
+
+**Hallazgo colateral, corregido:** el servidor del visor quedaba con **12 GB de RSS** tras dos sesiones en vivo aunque la VRAM volviera a 170 MB (glibc no devolvía la memoria del modelo). Eso dejaba sin RAM a los trabajos aislados (`run_isolated.sh` puso un tope de 5 GB y mató una corrida) y a Stella. `_release()` ahora llama `malloc_trim(0)`: medido, 51 MB → 1.98 GB tras una sesión. Además, al reiniciarlo el servidor viejo no terminó con SIGTERM (soltó el puerto y quedó colgado): pendiente de mirar.
+
+**Limitaciones.** Sin prueba en vivo con el celular todavía (requiere alguien caminando). El visor aún no muestra las dos trayectorias (etapa 16). Publicar desde Python a 30 fps compite por CPU con el preprocesado del modelo: medir en la etapa 19 si conviene mover el tee a un proceso aparte.
+
+## Integración Stella-VSLAM, etapa 4: comparación BASIC frente a Stella (2026-10-04, noche, continuación)
+
+**Pedido del usuario:** continuar con la siguiente etapa. Comparar antes de fusionar: los dos trackers sobre las mismas secuencias, corrigiendo tiempo, ejes y escala antes de interpretar.
+
+**Corrección previa: los videos del celular son de tasa variable.** El del fablab tiene 13 huecos de hasta 168 ms, e "índice / fps" se desvía hasta 0.6 s del tiempo real. `FrameSource` ahora usa el timestamp del contenedor (PTS). Los frames que extrajo ffmpeg para windowed están corridos 0.2-0.27 s, así que su instante se obtiene emparejando por contenido la imagen que vio el modelo con el video. Desfase residual entre trayectorias: ≤ 0.05 s.
+
+**Herramientas.**
+- `scripts_stream/traj_align.py`: Umeyama Sim(3), mano-ojo para la convención de cámara, desfase temporal por velocidad angular, RPE y escala por ventanas.
+- `scripts_context/compare_tracking.py`: compara LingBot windowed, LingBot streaming en vivo, Stella aislada y Stella en vivo.
+- El puente ROS2 ahora graba los reinicios de Stella como segmentos.
+
+**Resultados** (`ref` = LingBot windowed; no es ground truth, mide acuerdo):
+
+| | fablab | escaleras | pasillos |
+|---|---|---|---|
+| Stella aislada: ATE Sim(3) / RPE rot. 1 s | **1.34%** / 0.81° | **1.55%** / **1.89°** | no comparable (3 s útiles) |
+| LingBot streaming: ATE / RPE rot. 1 s | 1.85% / 0.83° | 2.75% / **6.42°** | 12.2% / 3.12° |
+| Stella en vivo (misma máquina que LingBot) | 6% de cobertura; en otra corrida, escala 1 → 4.7 en 10 s | 13 poses, dos reinicios | nunca inicializa |
+
+**Lectura.**
+- Con imagen nítida y CPU propia, Stella coincide con windowed mejor que el streaming. En escaleras, el streaming acumula error de rotación 3.4 veces más rápido: es el caso en que HYBRID debería ayudar.
+- La escala relativa nunca es 1 y varía un 12-21% en ventanas de 5 s: Sim(3) por ventana.
+- La relocalización de Stella al volver a la entrada de escaleras cae a 4.3% del largo de donde la pone windowed, con la alineación de los primeros 12 s.
+- **Hallazgo principal: Stella en vivo, compartiendo la máquina con LingBot, rinde una fracción de lo que rinde aislada,** y no es determinista (176 frente a 32 poses en dos corridas iguales).
+- La nitidez que ya mide BASIC distingue los frames con Stella en TRACKING (mediana 1154) de LOST (793).
+
+Detalle en `docs/TRACKING_BENCHMARK.md`; artefactos en `captures/stella/etapa4_2026-10-04/`.
+
+**Limitaciones.** Sin ground truth. Una corrida por configuración en vivo, salvo el fablab. Intrínsecos de Stella sin calibrar. No se aisló si la debilidad de Stella en vivo es por CPU, por la cola o por azar.
+
+## Integración Stella-VSLAM, etapa 5: buffer temporal de poses (2026-10-04, noche, continuación)
+
+**Pedido del usuario:** continuar con la siguiente etapa.
+
+**Qué es.** `scripts_stream/pose_buffer.py` responde "pose de esta fuente en el instante t" a partir de sus muestras, con los timestamps de adquisición. Interpola la posición de forma lineal y la orientación por SLERP, nunca los elementos de la matriz. No interpola entre mapas distintos de Stella ni a través de cortes. No extrapola. Si no hay muestra suficientemente cerca, no devuelve nada. El servidor en vivo lo usa para darle a cada frame de LingBot la pose de Stella del mismo instante, y graba tanto lo disponible en vivo como la consulta final.
+
+**Tolerancia medida.** Interpolando poses reales de Stella con huecos de 0.25 s, el error es de 1.9-2.4% del desplazamiento en 1 s y 0.3-0.7° de rotación: unas diez veces menos que lo que difieren los dos trackers entre sí. A 0.5 s la rotación ya se acerca a ese desacuerdo: `max_gap = 0.25 s`. LingBot tiene ruido propio por frame (3-7% ya a 0.2 s), así que lo correcto es consultar a Stella, que es densa, en los instantes de LingBot, y no al revés.
+
+**Resultados.**
+- En una sesión en vivo del fablab, el buffer le da pose de Stella a 13 de los 20 frames del modelo dentro del tramo trackeado; la asociación exacta, a 4.
+- La asociación en vivo fue igual a la a posteriori: la latencia de Stella no es un problema.
+- En la comparación, más pares (176 → 185, 110 → 121) con el mismo ATE al centésimo: la interpolación no distorsiona.
+- Dentro de una sesión en vivo, el límite sigue siendo que Stella da pocas poses (etapa 4).
+
+**Tres defectos encontrados y corregidos.**
+1. El mensaje `tracking` habría emitido `NaN`, que el navegador rechaza. Ahora es JSON estricto.
+2. Si la inferencia fallaba, Stella quedaba huérfana y el proceso abortaba. Ahora el cierre de Stella y del puente está en el `finally`; verificado forzando un checkpoint inexistente.
+3. El servidor del visor no terminaba con SIGTERM, porque aiohttp esperaba 60 s a los WebSockets abiertos. Ahora termina en 0.3 s con el navegador conectado.
+
+Baseline idéntico bit a bit. 29 pruebas unitarias. Detalle en `docs/STELLA_INTEGRATION.md`; artefactos en `captures/stella/etapa5_2026-10-04/`.
+
+## Integración Stella-VSLAM, etapa 6: selector BASIC / STELLA / HYBRID, y una corrección a la etapa 4 (2026-10-04, noche, continuación)
+
+**Pedido del usuario:** continuar con la siguiente etapa.
+
+**Qué es.** `scripts_stream/hybrid_tracking.py` produce la pose de referencia en tres modos, siempre en el mundo y la escala de BASIC:
+- **BASIC:** LingBot tal cual.
+- **STELLA:** la pose absoluta de Stella, anclada al mundo BASIC al empezar cada mapa.
+- **HYBRID:** encadena paso a paso el movimiento de Stella cuando es válido y si no el de BASIC. La escala por paso sale de BASIC, por mapa de Stella, así que la deriva de escala de Stella no se propaga.
+
+Los criterios son observables: estado de Stella, pose en este frame y el anterior del mismo mapa, escala conocida, sin salto de escala ni desacuerdo grosero de giro, y **ritmo de poses de Stella de al menos 10 por segundo**. El servidor calcula los tres modos por frame, los graba y anuncia el elegido (`tracking_mode`, `basic` por defecto). La geometría sigue con BASIC hasta la etapa 10. `scripts_context/simulate_hybrid.py` reproduce el selector sobre sesiones grabadas: en una sesión en vivo coincide con el selector real a 1e-15.
+
+**Corrección a la etapa 4.** Las afirmaciones "Stella coincide con LingBot windowed mejor que el streaming" y "el streaming acumula error de rotación 3.4 veces más rápido en escaleras" estaban **sesgadas por el tramo**: Stella se comparó solo donde trackeaba y BASIC en todo el recorrido. En el mismo tramo, BASIC coincide más con windowed (fablab 0-23 s: 0.83-0.94% frente a 1.34-1.5%). El error de rotación del streaming estaba donde Stella ya se había perdido. Además windowed es LingBot y favorece al streaming. Los resultados de la etapa 4 no se editan (bitácora append-only); esta es su corrección.
+
+**Medición contra referencias independientes** (croquis a mano y regreso a la puerta de entrada):
+
+| | BASIC | HYBRID | STELLA |
+|---|---|---|---|
+| escaleras, regreso a la entrada (Stella aislada, simulada) | 4.16% | 1.57% | **0.99%** |
+| fablab, forma contra croquis (Stella aislada, simulada) | 2.04-2.11% | 1.98-2.03% | 1.95-1.97% |
+| fablab, Stella en vivo sana (CPU repartida) | 2.07% | 2.09% | 2.11% |
+| fablab, Stella en vivo famélica, sin / con criterio de ritmo | 2.04% | 2.76% / **2.13%** | 2.78% / 3.61% |
+| pasillos | 15.85% | 15.91% | 16.18% |
+
+**Lectura.** La hipótesis "tracking actual + Stella > tracking actual" **no queda demostrada**: contra el croquis las diferencias son de ±0.1 puntos. El único indicio a favor es el cierre de escaleras por la relocalización de Stella al volver a la entrada, en una sola secuencia. Una Stella famélica empeora el recorrido; el criterio de ritmo lo evita en HYBRID. Fijar Stella a 4 núcleos de rendimiento y el modelo al resto ayudó (291 y 129 poses frente a 176, 32 y 41) con un costo de 3-5% para el modelo, pero Stella sigue sin ser determinista. **Decisión: BASIC sigue por defecto.** HYBRID queda disponible y es seguro. Hacen falta secuencias con revisitas y repeticiones para decidir.
+
+36 pruebas unitarias; baseline idéntico bit a bit. Detalle en `docs/STELLA_INTEGRATION.md` y `docs/TRACKING_BENCHMARK.md`; artefactos en `captures/stella/etapa6_2026-10-04/`.
+
+## Integración Stella-VSLAM, etapas 7 y 8: sin fusión avanzada por ahora, y marcos de coordenadas TF2 (2026-10-05)
+
+**Pedido del usuario:** las pruebas que demostrarían la mejora del híbrido (referencia independiente, lazos y revisitas, repeticiones) se harán al terminar todas las etapas; continuar con la siguiente.
+
+**Etapa 7 (fusión avanzada): estudiada, no implementada.**
+- El selector simple no mostró mejora contra referencias independientes, y una fusión de las mismas dos fuentes no puede sacar información que no está en los datos.
+- Ni LingBot ni Stella dan covarianzas: los pesos tendrían que calibrarse con ground truth, que falta.
+- La variabilidad de Stella entre corridas supera cualquier ganancia medida.
+- Se retoma si la matriz de pruebas muestra mejora en algún tipo de escena. Primera candidata: optimización de grafo con los cierres y relocalizaciones de Stella.
+
+**Etapa 8 (marcos de coordenadas).** Detalle en `docs/COORDINATE_FRAMES.md`.
+- `scripts_stream/frames.py` es la fuente única de convenciones: OpenCV dentro del repo, REP-103 hacia ROS2.
+- El puente publica TF2 (REP-105): `paralingbot_map → paralingbot_odom → paralingbot_camera_link → paralingbot_camera_optical`, más `paralingbot_map_cv`. La pose de cada frame va sellada con su stamp de adquisición.
+- `basic_pose` y `reference_pose` pasan a ejes ROS; antes publicaban la pose interna con ejes OpenCV bajo un frame de mapa.
+- La relación con el mapa de Stella es una Sim(3) y va por `/paralingbot/alignment/stella`, no por TF: TF es rígido y escondería la escala.
+- Stella usa `stella_map` / `stella_camera_link`, para no chocar con el `map` de GARDIAN.
+
+**Verificado en vivo** (`scripts_ros/check_frames.py`):
+- La TF buscada en el instante de cada frame reproduce la pose grabada: 60/60 frames en BASIC (error 8.7e-8) y 86/86 en STELLA (2.9e-7).
+- TF y topic coinciden (3e-16) y los estáticos son correctos.
+- La Sim(3) publicada reproduce la referencia del modo STELLA (5e-8).
+
+**Defecto encontrado y corregido:** las carpetas y los videos tienen stamps que empiezan en 0, y en tf2 el tiempo 0 significa "lo más reciente": el primer frame se buscaba mal (error 0.77). Ahora lo que sale a ROS2 de esas fuentes se corre con la hora de arranque.
+
+**Limitación:** el mapa no está nivelado con la gravedad; su "arriba" es el de la primera cámara (4.5°, 23° y 33° de inclinación en tres sesiones). Hace falta una IMU, en el robot.
+
+43 pruebas unitarias. Artefactos en `captures/stella/etapa8_2026-10-05/`.
+
+## Integración Stella-VSLAM, etapas 9 a 19: escala, geometría registrada, correcciones, mapas, visor, benchmark y optimización (2026-10-05)
+
+**Pedido del usuario:** completar todas las etapas restantes del plan, con todas las gráficas y matrices de comparación posibles guardadas en sus carpetas, y al final ordenar las carpetas del repo tomando como referencia GARDIAN. Las pruebas físicas nuevas (circuito, lazo, alguien caminando) quedan para después, por decisión del usuario. Sin commits. Detalle por etapa en `docs/STELLA_INTEGRATION.md`; benchmark y matriz en `docs/TRACKING_BENCHMARK.md`.
+
+**Etapa 9, escala.** `scripts_context/scale_alignment.py` compara cinco alineaciones de Stella hacia LingBot sobre los mismos pares. SE(3) es entre 1.4 y 12 veces peor que Sim(3): la escala nunca es 1 (1.04-2.7). Una Sim(3) fijada en los primeros 5 s extrapola 2-5 veces peor que la global, y una re-estimada por ventana **causal** generaliza mejor (escaleras: 3.02% contra 5.57% global y 9.02% inicial). En el selector, la escala por ventana para el modo STELLA (`stella_scale=window`) mejora el regreso a la entrada de escaleras de 0.99% a 0.72% y es neutra en el fablab. Una secuencia: `anchor` sigue por defecto.
+
+**Etapas 10, 11 y 13, geometría registrada.** La pose de referencia entra después del modelo (`register_with_reference` en vivo, `register_map.py` fuera de línea, `MapAccumulator` re-registrable). En 7 sesiones del fablab, la variación entre corridas de la misma configuración (BASIC: 1.94-2.32% contra el croquis) es tan grande como la diferencia entre referencias. Con la pose de Stella **baja la coherencia multivista** (0.84-0.89 contra 0.90-0.94): la profundidad de LingBot encaja con su propia pose.
+
+**Etapa 12, correcciones de Stella.** El nodo de Stella publica sus keyframes con el timestamp de su imagen (`~/keyframes_full`); cada frame se ancla a uno y se corrige cuando Stella lo mueve, también en vivo (`repose` al visor). Fuera de línea, las poses corregidas coinciden mejor con windowed (fablab 1.18% → 1.05%, escaleras 3.33% → 3.12%) y cierran mejor (escaleras 48.9% → 41.4%). Al implementarlo el nodo se colgaba: `Eigen::Transform::rotation()` hace una SVD que no termina con valores no finitos (encontrado con gdb). **No hubo ningún loop closure real en los datos.**
+
+**Etapa 14, TSDF y splat.** Registrar con la pose de Stella empeora la malla (12.06 → 11.32 dB) y el splat (16.69 → 15.67 dB) en frames apartados.
+
+**Etapa 15, cielo.** `skyseg.onnx` marca como cielo paredes blancas, vidrios y piso movido (23% de los píxeles en la escalera, casi todo falso). Apagado por defecto; solo para exteriores.
+
+**Etapa 16, visor.** Tres trayectorias, fuente usada por frame con el motivo, estado y ritmo de Stella, latencia, keyframes y correcciones. Verificado en Chromium headless con una sesión en vivo: el panel muestra el paso de STELLA a BASIC cuando Stella se pierde, sin errores de JS.
+
+**Etapas 17 y 18, benchmark y matriz.** 17 corridas (A baseline, D BASIC+STELLA, E y S con la geometría registrada, pruebas de falla, webcam y celular) más una repetición del fablab con recursos. Stella en vivo trackea el 44-49% de los frames en el fablab, 13-16% en escaleras y casi nada en pasillos. El sistema degrada de forma controlada cuando Stella muere (SIGKILL), cuando el modelo se detiene 8 s y cuando Stella se pierde. La matriz cubre 11 de 15 pruebas con grabaciones; rotación pura y loop closure quedan para las pruebas físicas, y la línea recta y la cámara remota caminando quedan parciales. **BASIC sigue por defecto.**
+
+**Etapa 19, optimización.** Un perfil (`py-spy`) mostró que el puente gastaba CPU en invertir una matriz constante por keyframe y en girar todos los frames del video para publicar 1 de cada 2. Corregido: la CPU del proceso del modelo con el puente baja de ~490% a 308%, igual que sin ROS2.
+
+**Defectos encontrados y corregidos en el camino:** el monitor de recursos moría en la primera muestra (el primer lote quedó sin recursos y se repitió el fablab); `replay_live.py` no terminaba con SIGINT/SIGTERM porque `rclpy.init()` instala sus propios manejadores (ahora termina en 3 s guardando la sesión); el splat del benchmark necesitaba `CUDA_HOME`.
+
+**Limitaciones:** una corrida por configuración (salvo el fablab), sin ground truth métrico, sin circuito ni lazo grabado, intrínsecos de Stella sin calibrar.
+
+## Repo reorganizado con la estructura de GARDIAN (2026-10-05)
+
+**Pedido del usuario:** al terminar las etapas, ordenar las carpetas tomando como referencia GARDIAN, reduciendo las de la raíz. La raíz pasa de ~75 entradas a 19: el código propio va a `src/` (`vivo`, `mapas`, `ros`, `captura`, `gpu`, `secuencias`, `diagnostico`, `upstream`), la instalación a `scripts/`, la documentación a `docs/`, las pruebas a `test/`, los datos de ejemplo a `datos/` y las salidas de las campañas viejas (y los ~40 logs y CSV que había en la raíz) a `registros/`. `demo.py` y `lingbot_map/` no se movieron. Lo hizo `scripts/reorganizar_repo.py` con `git mv`; git ve todo como renombres.
+
+**Las secciones anteriores de esta bitácora usan las rutas viejas** (no se reescriben): la tabla de equivalencias está en `docs/ESTRUCTURA.md`.
+
+Verificado primero en una copia y después en el repo: compilación, 48 pruebas, `--help` de los 54 scripts, enlaces de `docs/`, y corridas reales (sesión en vivo con Stella, análisis del benchmark, `build_maps.py`, el visor y un trabajo de construir mapas desde su API). Al probarlo en la copia aparecieron tres errores del propio reorganizador que se corrigieron antes de aplicarlo: subía un nivel de más las rutas a hermanos, dejaba imports con barras (`src/gpu.monitor_gpu`) y rompía la ruta de `run_stella.sh`; este último solo se veía en el log de Stella, porque la sesión degradaba a BASIC sin error.
+
+## Visor: re-encuadre en vivo, mando Xbox recordado y cámaras de otros equipos por SSH (2026-10-05)
+
+**Pedido del usuario:** el mapa en vivo se veía diminuto y con los puntos indistinguibles; el mando Xbox conectado por USB no aparecía en la interfaz; y las cámaras de los equipos por SSH debían poder usarse como en GARDIAN.
+
+- **Re-encuadre en vivo.** El visor fijaba la escala con la caja completa de los primeros ~20 000 puntos. En una sesión con el celular tapado al arrancar, esos frames negros fijaron la escala y el recorrido terminó siendo ~28 veces la profundidad. Ahora la escala sale de una caja robusta (percentiles 2-98 % más la trayectoria). Cada 8 frames se vuelve a normalizar si el mapa cambió más de 2 veces, y el tamaño de punto se ajusta en la misma proporción. Probado reproduciendo esa sesión: dos re-encuadres y los puntos se distinguen.
+- **Mando Xbox.** El sistema lo veía (Xbox One S `045e:02ea`, `xpad`, `/dev/input/js0`), pero Firefox es snap y su interfaz `joystick` estaba desconectada (`sudo snap connect firefox:joystick`). Además se conectaba y desconectaba en bucle, probablemente por el cable. El visor ahora lee los dos mapeos (estándar y el de xpad sin remapear), recuerda el último mando usado (✓) y navega con él también en órbita. Probado simulando el mando en un navegador sin pantalla; con el mando físico, pendiente del `snap connect`.
+- **Todas las cámaras locales y el puente ROS2 en el lanzador.** La Logitech B910 no aparecía: la prueba del servidor hacía una sola lectura y esa cámara tarda ~1 s, con un primer JPEG corrupto. Ahora `src/vivo/video_devices.py` lista todas las cámaras por nombre, las prueba con reintentos y muestra también las que fallan, con el motivo. `launch.py` arranca el servidor con el puente ROS2 + Stella por defecto (`--no-ros2` para apagarlo), y la configuración de cámara de Stella se elige o se genera según la resolución publicada. Verificado con la Logitech: imagen por ROS2 a 16.6 fps y Stella corriendo con su configuración de 640x480.
+- **Momentos estáticos** (`StaticHold`, en `src/vivo/context_gate.py`). La cámara virtual seguía avanzando con la cámara quieta, porque el streaming deriva. Ahora, con la misma regla de movimiento del analizador (flujo DIS acumulado < 25 % del paso de 36 px), la pose no avanza en esos frames y los puntos se siguen agregando a la nube. La deriva de la pausa se absorbe sin salto al reanudar. Con la Logitech quieta 70 s, el modelo derivó 0.25 unidades y la pose retenida 0. Caminando en el fablab: ningún falso estático y el mismo recorrido (2.23 % contra el croquis).
+- **Cámaras por SSH** (`src/vivo/ssh_camera.py`). Usa el método de `vigia_cam_view.py` de GARDIAN: ffmpeg MJPEG por la salida estándar del SSH. Para vigia-1 usa `y10cap`. Los equipos se descubren desde `~/.ssh/config` y los encontrados quedan recordados. Probado con la tubería local (webcam a 15 fps); los equipos remotos no estaban alcanzables, así que no se probaron. Con un equipo apagado, el error se informa y la sesión se cierra limpia.
 
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.

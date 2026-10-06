@@ -5,7 +5,7 @@ the map). The .npz is half resolution, so the cloud has ~4x fewer points than a
 live run: lighter in the browser, same geometry.
 
 Usage:
-  python3 scripts_context/view_npz.py <run.npz> [--port 8080] [--glb_out map.glb]
+  python3 src/mapas/view_npz.py <run.npz> [--port 8080] [--glb_out map.glb]
 """
 import argparse
 import os
@@ -14,7 +14,7 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 def main():

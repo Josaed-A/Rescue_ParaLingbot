@@ -1,6 +1,6 @@
 """High-frequency RAM+VRAM+GPU monitor for the Linux/NVIDIA GPU baseline run.
 
-Extends the CPU-only approach used in scripts_seq/monitor.py (see README.md,
+Extends the CPU-only approach used in src/secuencias/monitor.py (see README.md,
 "Campana de caracterizacion secuencial") with GPU-side metrics via pynvml
 (low-overhead NVML bindings, no subprocess-per-sample) plus torch's own
 process-precise allocator counters. Runs as a background thread in the SAME

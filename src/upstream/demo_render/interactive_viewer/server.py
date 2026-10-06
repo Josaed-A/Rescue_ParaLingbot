@@ -21,7 +21,7 @@ import numpy as np
 import torch
 
 # Add project root to path
-_PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[4])
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 

@@ -8,7 +8,7 @@ Two metrics that disagree on purpose:
     real frames. Catches noisy depth and pose jitter, but is blind to slow drift.
 
 Usage:
-  python3 scripts_context/summarize_runs.py --eval_dir <dir> --sketch <ruta.jpeg> \
+  python3 src/mapas/summarize_runs.py --eval_dir <dir> --sketch <ruta.jpeg> \
       [--out combined.json] [--skip_consistency]
 """
 import argparse

@@ -40,7 +40,7 @@ from types import SimpleNamespace
 
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # repo root
 
 
 # ---------------------------------------------------------------------------

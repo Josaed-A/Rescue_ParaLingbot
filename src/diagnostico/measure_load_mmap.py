@@ -4,7 +4,7 @@ for compatibility checks (torch 2.13.0 has the mmap param; the checkpoint is
 zip-based, a lightweight mmap=True probe completed in 0.6s vs ~70-90s
 without it) and this experiment's rationale.
 
-This is an EXACT clone of scripts/measure_load_only.py (the script used for
+This is an EXACT clone of src/diagnostico/measure_load_only.py (the script used for
 the original 16.1GB-peak baseline) with the ONE change requested: the
 torch.load call gets `mmap=True`. Everything else — model construction,
 args, stage sequence, del+gc.collect step at the end — is identical, so the
