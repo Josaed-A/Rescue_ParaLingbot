@@ -282,15 +282,15 @@ Son el tramo metodológicamente más sólido del proyecto (§2.2, H1).
 | Repositorio | Rama | Último commit en GitHub | Qué contiene |
 |---|---|---|---|
 | `Josaed-A/Rescue_ParaLingbot` | `proceso-capas-icp-robusto` (sale de `Vizuallizador`) | este documento, sobre `340ec35` | Mapeo con LingBot-Map, integración con Stella, filtro geométrico, estabilización con Open3D, malla TSDF, splat, visor y diagnóstico de profundidad |
-| `Josaed-A/Pruebas_Macondo` | `estado-dinov2-mujoco-paralingbot` | `d43944a` (14/10) | DINOv2, gemelo en MuJoCo, X2 y evaluación |
+| `Josaed-A/Pruebas_Macondo` | `estado-dinov2-mujoco-paralingbot` | `95428e2` (17/10) | DINOv2, gemelo en MuJoCo por capas, X2, evaluación, grafos entre etapas y variante con GenPC |
 
-**Advertencia importante para la auditoría.** El código del gemelo posterior al 14/10 **no está en GitHub**: está en la copia local de Pruebas_Macondo sin commit (40 archivos). Ahí están:
+**El código del gemelo está completo en GitHub desde el commit `95428e2` de Pruebas_Macondo.** Ahí están:
 - `run_gemelo_capas.sh`;
 - `vision/recuperar_modelos.py`, `vision/genpc_objetos.py`, `vision/grafos_etapas.py`, `vision/grafo_proceso.py`, `vision/comparar_variantes.py`, `vision/malla_open3d.py` y `vision/memoria_semantica.py`;
 - los cambios a `mapa_mujoco.py` y al evaluador;
-- 24 de las 76 pruebas automáticas (además, otro archivo de pruebas tiene cambios sin commit).
+- las 76 pruebas automáticas.
 
-Para auditar el gemelo, ese código tiene que subirse. Las figuras y cifras de ese código que cita este documento están copiadas en [`docs/auditoria/`](auditoria/).
+Hasta ese commit, lo posterior al 14/10 estaba solo en la copia local. Las figuras y los datos que cita este documento también están copiados en [`docs/auditoria/`](auditoria/).
 
 **Fuera de git, por tamaño o privacidad** (`env/assets.json` describe los modelos):
 - videos y sesiones (`captures/`);
@@ -485,7 +485,7 @@ Fuentes: [`auditoria/comparacion_A_B.json`](auditoria/comparacion_A_B.json), [`e
 
 ### Pruebas automáticas
 - [ ] **ParaLingbot:** `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test` recoge 65 pruebas. Las del puente necesitan ROS 2 cargado.
-- [ ] **Pruebas_Macondo:** `env -u PYTHONPATH .venv/bin/python -m pytest -q tests` pasa 76 de 76. Al 17/10 pasan, pero 24 están en archivos sin commit.
+- [ ] **Pruebas_Macondo:** `env -u PYTHONPATH .venv/bin/python -m pytest -q tests` pasa 76 de 76 (commit `95428e2`).
 - [ ] Revisar qué cubren, sobre todo:
   - `test/test_o3d_estable.py`: deriva en un circuito, cierres falsos en un pasillo repetido, 4 GDL;
   - `tests/test_recuperar_modelos.py`;
@@ -572,7 +572,7 @@ python -m vision.comparar_variantes mapas/piso1_capas mapas/piso1_capas_genpc --
 5. **Repeticiones.** Al menos 3 corridas por variante (y por sesión en vivo, dada la no determinación de Stella), con media y dispersión.
 6. **Separar ajuste y evaluación.** Fijar los parámetros con unos videos y reportar en otros.
 7. **Corrección de profundidad en el gemelo.** El diagnóstico (H9) sugiere usar la profundidad corregida (`eval/<n>_prof.npz`) en las etapas 2–5. No se hizo todavía.
-8. **Subir el código del gemelo** (Pruebas_Macondo) para que sea auditable.
+8. ~~Subir el código del gemelo (Pruebas_Macondo) para que sea auditable.~~ Hecho el 17/10 (`95428e2`).
 
 ## 2.12 Inventario de documentos
 
