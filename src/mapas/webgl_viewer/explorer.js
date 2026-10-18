@@ -10,8 +10,10 @@ const slug = (t) => String(t).toLowerCase().normalize("NFD").replace(/[^\w]+/g, 
 const fmtSize = (b) => b > 2 ** 30 ? `${(b / 2 ** 30).toFixed(1)} GB` : b > 2 ** 20 ? `${(b / 2 ** 20).toFixed(1)} MB`
   : b > 1024 ? `${(b / 1024).toFixed(0)} KB` : `${b} B`;
 
-const MAP_ORDER = ["nube", "alta", "cruda", "malla", "malla_f", "splat", "splat_f", "estructura", "glb"];
-const MAP_SHORT = { nube: "nube", alta: "alta dens.", cruda: "cruda + tray.", malla: "malla", malla_f: "malla filtr.",
+const MAP_ORDER = ["nube", "nube_ed", "nube_md", "nube_pd", "nube_mc", "alta", "cruda", "nube_o", "nube_e", "duplicadas", "malla", "malla_f", "malla_e", "malla_m", "malla_p", "splat", "splat_f",
+                   "estructura", "glb"];
+const MAP_SHORT = { nube: "nube", alta: "alta dens.", cruda: "cruda + tray.", malla: "malla", malla_f: "malla filtr.", malla_e: "malla estab.", nube_ed: "nube densa estab.", malla_m: "malla multiway+piso", nube_md: "nube multiway+piso", malla_p: "malla piso alin.", nube_pd: "nube piso alin.", nube_mc: "nube combinada", nube_o: "diag. orig.", nube_e: "diag. estab.",
+                    duplicadas: "duplicadas",
                     splat: "splat", splat_f: "splat filtr.", estructura: "estructura", glb: "glb viejo" };
 const TASKS = [
   { id: "windowed", label: "Reprocesar en windowed (ventana 24)", d: "Vuelve a correr el modelo sobre frames/ en modo windowed: corrige la deriva del streaming. Recomendado para sesiones en vivo. ~5 min, GPU.", needs: "frames" },
@@ -22,6 +24,16 @@ const TASKS = [
   { id: "malla", label: "Malla TSDF", d: "Superficie con color por fusión TSDF. ~3 min, CPU.", map: "malla" },
   { id: "splat", label: "Gaussian Splatting", d: "Reconstrucción fotorrealista (gsplat, 7000 iteraciones). ~5-8 min, GPU.", map: "splat" },
   { id: "malla_f", label: "Malla TSDF filtrada", d: "La malla TSDF con el filtro geométrico (requiere el filtro). ~3 min.", map: "malla_f" },
+  { id: "estable", label: "Estabilización Open3D (grafo de poses)", d: "Antes del TSDF: valida poses y profundidad, registra fragmentos (odometría y cierres verificados), filtra atípicos y diagnostica superficies duplicadas. No cambia las predicciones. ~1-10 min, CPU.", map: null },
+  { id: "nube_e", label: "Nube densa estabilizada", d: "La nube densa (como 'Nube densa') con las poses y máscaras de la estabilización Open3D (requiere 'estable'). ~1-3 min, RAM.", map: "nube_ed" },
+  { id: "malla_e", label: "Malla TSDF estabilizada", d: "La malla TSDF con las poses y máscaras de la estabilización Open3D (requiere 'estable'). ~3 min, CPU.", map: "malla_e" },
+  { id: "multiway", label: "Registro multivía (Open3D)", d: "Como 'Estabilización Open3D', pero con el registro multivía del tutorial de Open3D (ICP por pares, grafo completo, poda) y su nube combinada. ~1-5 min, CPU.", map: "nube_mc" },
+  { id: "nube_m", label: "Nube densa multiway", d: "La nube densa con las poses y máscaras del registro multivía (requiere 'multiway'). ~1-3 min, RAM.", map: "nube_md" },
+  { id: "malla_m", label: "Malla TSDF multiway", d: "La malla TSDF con las poses y máscaras del registro multivía (requiere 'multiway'). ~3 min, CPU.", map: "malla_m" },
+  { id: "prof", label: "Profundidad corregida (diagnóstico)", d: "Corrige la profundidad de cada frame fuera del piso (escala o escala por fila) contra otros momentos del recorrido, solo donde el ajuste es plausible y validado; escribe eval/<name>_prof.npz para usarlo con las demás tareas (requiere 'filtro'). ~1-20 min, CPU.", map: null },
+  { id: "piso", label: "Piso alineado (Open3D)", d: "Como 'Estabilización Open3D' y además cada frame se ajusta en altura e inclinación al piso combinado de todos los frames (permanencia del piso). ~2-7 min, CPU.", map: "nube_pd" },
+  { id: "nube_p", label: "Nube densa con piso alineado", d: "La nube densa con las poses de 'piso' (requiere 'piso'). ~1-3 min, RAM.", map: "nube_pd" },
+  { id: "malla_p", label: "Malla TSDF con piso alineado", d: "La malla TSDF con las poses de 'piso' (requiere 'piso'). ~3 min, CPU.", map: "malla_p" },
   { id: "splat_f", label: "Gaussian Splatting filtrado", d: "Splat con el filtro: sin personas, profundidad depurada y ajustada a planos. ~5-8 min, GPU.", map: "splat_f" },
   { id: "video", label: "Video del recorrido", d: "Render del recorrido con batch_demo (MP4). ~2 min, GPU.", map: null },
 ];

@@ -23,8 +23,27 @@ import os
 import numpy as np
 
 
-def unproject(d, ds_idx=1):
-    """Yield (points, colors, conf) in world coordinates for each real frame."""
+def load_stable(npz_path, d, path):
+    """Poses y máscaras de o3d_estable.py (y la del filtro si su metadato la usa), comprobadas contra este .npz."""
+    z = np.load(path)
+    meta = json.loads(str(z["meta"]))
+    real = np.flatnonzero(d["is_real"])
+    E = np.tile(np.eye(4), (len(real), 1, 1))
+    E[:, :3, :4] = d["extrinsic"][real]
+    if not np.array_equal(z["real"], real) or np.abs(z["c2w_original"] - np.linalg.inv(E)).max() > 1e-4:
+        raise SystemExit(f"{path} es de otra reconstrucción que {npz_path}")
+    fkeep = None
+    if meta.get("mascara_filtro"):
+        f = np.load(meta["mascara_filtro"])
+        if np.array_equal(f["real"], real) and np.abs(f["c2w_fix"] - z["c2w"]).max() < 1e-4:
+            fkeep = f["keep"]
+    return {"pos": {int(r): k for k, r in enumerate(real)}, "c2w": z["c2w"].astype(np.float64),
+            "keep": z["keep"], "stride": int(z["stride"]), "fkeep": fkeep, "meta": meta}
+
+
+def unproject(d, ds_idx=1, stable=None):
+    """Yield (points, colors, conf) in world coordinates for each real frame. With `stable`, the poses and the
+    per-pixel masks of the Open3D stabilization (same depth, same pixels otherwise)."""
     depth = d["depth"]
     conf = d["depth_conf"]
     img = d["images"]
@@ -41,7 +60,15 @@ def unproject(d, ds_idx=1):
         z = depth[i].astype(np.float64)
         c = conf[i].astype(np.float32)
         m = np.isfinite(z) & (z > 0)
-        yield (i, u[m], v[m], z[m], c[m], img[i][m], K[i], c2w[i])
+        T = c2w[i]
+        if stable is not None:
+            k = stable["pos"][int(i)]
+            kp, st = stable["keep"][k], stable["stride"]
+            m &= kp[np.minimum(np.arange(h) // st, kp.shape[0] - 1)][:, np.minimum(np.arange(w) // st, kp.shape[1] - 1)]
+            if stable["fkeep"] is not None:
+                m &= stable["fkeep"][k]
+            T = stable["c2w"][k]
+        yield (i, u[m], v[m], z[m], c[m], img[i][m], K[i], T)
 
 
 def main():
@@ -58,12 +85,18 @@ def main():
                    help="frames acumulados antes de fusionar en vóxeles (controla la memoria)")
     p.add_argument("--max_points_per_frame", type=int, default=0,
                    help="0 = todos los píxeles válidos del frame")
+    p.add_argument("--stable", default=None,
+                   help="<..>_estable.npz de o3d_estable.py: poses estabilizadas y máscaras de Open3D (nube densa estabilizada)")
     p.add_argument("--float32", action="store_true",
                    help="guardar las coordenadas en float32 en vez del double de open3d: "
                         "mismo número de puntos, archivo a la mitad y carga más rápida en el visor")
     args = p.parse_args()
 
     d = np.load(args.npz)
+    stable = load_stable(args.npz, d, args.stable) if args.stable else None
+    if stable is not None:
+        print(f"estabilización Open3D: poses {stable['meta']['version_poses']}, máscara Open3D"
+              f"{' + consistencia multivista del filtro' if stable['fkeep'] is not None else ''}", flush=True)
     confs = d["depth_conf"][d["is_real"]].astype(np.float32)
     thr = float(np.percentile(confs, args.conf_percentile)) if args.conf_percentile > 0 else -np.inf
     print(f"umbral de confianza: {thr:.3f} (percentil {args.conf_percentile})", flush=True)
@@ -87,7 +120,7 @@ def main():
     lo = np.full(3, np.inf)
     hi = np.full(3, -np.inf)
     raw = 0
-    for args_ in unproject(d, args.frame_stride):
+    for args_ in unproject(d, args.frame_stride, stable):
         n, w, _ = frame_points(*args_)
         raw += n
         if w is not None:
@@ -122,7 +155,7 @@ def main():
             buf_p.clear()
             buf_c.clear()
 
-    for args_ in unproject(d, args.frame_stride):
+    for args_ in unproject(d, args.frame_stride, stable):
         _, w, rgb = frame_points(*args_)
         if w is None:
             continue
@@ -165,7 +198,9 @@ def main():
         json.dump({"npz": os.path.basename(args.npz), "frames_reales": int(d["is_real"].sum()),
                    "puntos_crudos": int(raw), "puntos_finales": n_vox,
                    "voxel_rel": args.voxel_rel, "conf_percentile": args.conf_percentile,
-                   "frame_stride": args.frame_stride, "resolucion_guardada": int(d["ds"])}, f, indent=1)
+                   "frame_stride": args.frame_stride, "resolucion_guardada": int(d["ds"]),
+                   "estable": args.stable, "version_poses": stable["meta"]["version_poses"] if stable else None,
+                   "tipo_geometria": "observada, registrada y filtrada (Open3D)" if stable else "observada"}, f, indent=1)
 
 
 if __name__ == "__main__":

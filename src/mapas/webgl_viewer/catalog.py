@@ -21,10 +21,20 @@ import time
 PRUEBA_RE = re.compile(r"^(prueba_\d+|sesion_[\w\-]+)$")
 
 MAP_TYPES = [   # (patrón, tipo, etiqueta) -- el orden es el de presentación
+    (re.compile(r"_multiway_denso\.ply$"), "nube_md", "nube densa multiway + piso alineado (Open3D)"),
+    (re.compile(r"_piso_denso\.ply$"), "nube_pd", "nube densa con piso alineado (Open3D)"),
+    (re.compile(r"_estable_denso\.ply$"), "nube_ed", "nube densa estabilizada (Open3D)"),
+    (re.compile(r"_combinada\.ply$"), "nube_mc", "nube combinada multiway (tutorial Open3D)"),
     (re.compile(r"_denso\.ply$"), "nube", "nube densa"),
     (re.compile(r"_denso_alta\.ply$"), "alta", "nube alta densidad"),
     (re.compile(r"_raw\.ply$"), "cruda", "cruda + trayectoria"),
     (re.compile(r"_filtrado_malla\.glb$"), "malla_f", "malla TSDF filtrada"),
+    (re.compile(r"_multiway_malla\.glb$"), "malla_m", "malla TSDF multiway + piso alineado (Open3D)"),
+    (re.compile(r"_piso_malla\.glb$"), "malla_p", "malla TSDF con piso alineado (Open3D)"),
+    (re.compile(r"_estable_malla\.glb$"), "malla_e", "malla TSDF estabilizada (Open3D)"),
+    (re.compile(r"_nube_estable\.ply$"), "nube_e", "nube de diagnóstico estabilizada (submuestreada)"),
+    (re.compile(r"_nube_original\.ply$"), "nube_o", "nube de diagnóstico original (submuestreada)"),
+    (re.compile(r"_duplicadas\.ply$"), "duplicadas", "superficies duplicadas (diagnóstico)"),
     (re.compile(r"_malla\.glb$"), "malla", "malla TSDF"),
     (re.compile(r"_filtrado_splat\.ply$"), "splat_f", "gaussian splat filtrado"),
     (re.compile(r"_splat\.ply$"), "splat", "gaussian splat"),
@@ -32,7 +42,7 @@ MAP_TYPES = [   # (patrón, tipo, etiqueta) -- el orden es el de presentación
     (re.compile(r"_dense\.ply$"), "nube", "nube densa"),
     (re.compile(r"(?<!_malla)(?<!_estructura)\.glb$"), "glb", "glb (viejo)"),
 ]
-SUFFIXES = ["_filtrado_malla.glb", "_filtrado_splat.ply", "_estructura.glb", "_denso_alta.ply", "_denso.ply", "_raw.ply", "_malla.glb", "_splat.ply", "_dense.ply", ".glb"]
+SUFFIXES = ["_estable_denso.ply", "_combinada.ply", "_filtrado_malla.glb", "_estable_malla.glb", "_nube_estable.ply", "_nube_original.ply", "_duplicadas.ply", "_filtrado_splat.ply", "_estructura.glb", "_denso_alta.ply", "_denso.ply", "_raw.ply", "_malla.glb", "_splat.ply", "_dense.ply", ".glb"]
 DEFAULT_CATEGORIES = ["video grabado", "streaming", "webcam", "desnivel", "escaleras", "plano",
                       "interior", "exterior", "prueba local", "sin guardar"]
 SKIP_DIRS = {"candidates", "candidates_full", "frames", "variantes", "source", "__pycache__"}
@@ -73,8 +83,14 @@ def _maps(p, root):
                 if pat.search(fn):
                     base = _map_base(fn)
                     cams = None
-                    for cand in (os.path.join(dirpath, base + "_cameras.json"),
-                                 os.path.join(ex, "webgl", base + "_cameras.json")):
+                    # Capas estabilizadas: primero las cámaras estabilizadas (exports/estable/), luego las originales.
+                    stable_first = (os.path.join(ex, "estable", base + "_cameras.json"),) \
+                        if typ in ("malla_e", "nube_ed", "nube_e", "duplicadas") else ()
+                    if typ in ("malla_m", "nube_md", "nube_mc", "malla_p", "nube_pd"):   # variantes: sus cámaras
+                        stable_first = (os.path.join(ex, "multiway" if typ in ("malla_m", "nube_md", "nube_mc")
+                                                     else "piso", base + "_cameras.json"),)
+                    for cand in stable_first + (os.path.join(dirpath, base + "_cameras.json"),
+                                                os.path.join(ex, "webgl", base + "_cameras.json")):
                         if os.path.isfile(cand):
                             cams = _rel(cand, root)
                             break
@@ -88,6 +104,8 @@ def _maps(p, root):
                             info = _rel(cand, root)
                             break
                     full = os.path.join(dirpath, fn)
+                    if "_prof" in base:           # de eval/<name>_prof.npz (diagnostico_profundidad.py --corregir)
+                        label = label + " · profundidad corregida"
                     out.append({"type": typ, "label": label, "name": base, "file": _rel(full, root),
                                 "ext": fn.rsplit(".", 1)[-1], "size_mb": round(os.path.getsize(full) / 2**20, 1),
                                 "cameras": cams, "info": info})

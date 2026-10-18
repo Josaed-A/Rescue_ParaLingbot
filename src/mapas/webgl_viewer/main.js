@@ -645,7 +645,7 @@ async function loadCloud(url, ext) {
   });
 }
 
-const UNITS = { malla: "triángulos", malla_f: "triángulos", estructura: "triángulos", splat: "gaussianas", splat_f: "gaussianas" };
+const UNITS = { malla: "triángulos", malla_f: "triángulos", malla_e: "triángulos", malla_m: "triángulos", malla_p: "triángulos", estructura: "triángulos", splat: "gaussianas", splat_f: "gaussianas" };
 let currentMap = null;
 async function loadMap(meta) {
   if (live.running) { setStatus("hay una sesión en vivo en curso: detenela para cargar otro mapa"); return; }

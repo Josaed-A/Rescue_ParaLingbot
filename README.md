@@ -270,6 +270,18 @@ Ver la sección "Amortiguador visual más fuerte" al final de la bitácora.
 
 **Continuación (más reciente): visor con re-encuadre en vivo, mando Xbox recordado y cámaras de otros equipos por SSH.** Ver la sección del 2026-10-05 sobre el visor al final de la bitácora.
 
+**Continuación (más reciente): Open3D antes del TSDF y arquitectura de grafos** (grafo de poses con cierres verificados, estructura, memoria semántica y escena física; corrección de `inlier5`). Ver la sección del 2026-10-14 al final de la bitácora y `docs/ARQUITECTURA_GRAFOS_PARALINGBOT.md`.
+
+**Continuación (más reciente): nubes densas estabilizadas y pruebas de punta a punta.** Las nubes de las sesiones nuevas se veían ralas: faltaban la nube densa y las cámaras, y la nube estabilizada que se miraba era la de diagnóstico (1 de cada 16 píxeles). Nueva tarea `nube_e` (nube densa con poses y máscaras de Open3D) y cámaras estabilizadas para el visor. Ver la sección del 2026-10-15 al final de la bitácora y `docs/PIPELINE_OPEN3D_TSDF.md` §6.
+
+**Continuación (más reciente): diagnóstico de profundidad contra pose, y corrección de la profundidad por frame.** El error entre visitas es sobre todo de profundidad y no es uniforme dentro del frame. Las poses y la focal variable no son la causa principal, y el piso tiene un error propio. Una corrección de profundidad por frame fuera del piso, validada en píxeles no usados, reduce la inconsistencia de paredes y escaleras un 25–50 % sin empeorar el piso. Ver la sección «Diagnóstico de profundidad» del 2026-10-15 al final de la bitácora y `docs/DIAGNOSTICO_PROFUNDIDAD.md`.
+
+**Continuación (más reciente): piso1 fuera de línea y el grafo de poses a 4 grados de libertad.** En un video que empieza girando en el lugar, windowed dejó el piso de ese tramo 0.96 m más arriba; streaming, 0.05 m. Se procesaron todos los frames (1358). El grafo de poses de Open3D no encontró una corrección rígida que mejore el mapa sin empeorar el piso; queda la opción `--dof4` (rumbo y plano horizontal) para recorridos con revisitas. Ver la sección del 2026-10-17 al final de la bitácora.
+
+**Continuación (más reciente): piso1 con la arquitectura completa fuera de línea.** Es la etapa 1 del proceso por capas de Pruebas_Macondo: Stella, HYBRID, analizador y *static hold* sobre todo el video. Stella aportó la pose en 3 de 422 frames. Ver la sección del 2026-10-17 (noche) al final de la bitácora.
+
+**Continuación (más reciente): la ruta deformada por el analizador de contexto, e ICP robusto en el grafo de poses.** En videos rápidos, la etapa 1 usa cadencia uniforme; el grafo mide con ICP punto a plano robusto (Tukey) y puede corregir a 4 grados de libertad. Ver la sección del 2026-10-17 (noche) sobre la ruta deformada, al final de la bitácora.
+
 **Pendiente de decisión del usuario:** implementar el driver de captura de webcam en vivo (análisis ya hecho, nada implementado todavía), decidir si mitigar el techo de VRAM de la GPU antes de ese experimento (dado que a ~4 FPS el mismo OOM se alcanzaría en ~9 segundos de captura continua), continuar la campaña secuencial en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o recién ahí empezar la integración/optimización con Paragraphica.
 
 ## Estado del diagnóstico (ya hecho, no repetir)
@@ -3299,6 +3311,287 @@ Verificado primero en una copia y después en el repo: compilación, 48 pruebas,
 - **Todas las cámaras locales y el puente ROS2 en el lanzador.** La Logitech B910 no aparecía: la prueba del servidor hacía una sola lectura y esa cámara tarda ~1 s, con un primer JPEG corrupto. Ahora `src/vivo/video_devices.py` lista todas las cámaras por nombre, las prueba con reintentos y muestra también las que fallan, con el motivo. `launch.py` arranca el servidor con el puente ROS2 + Stella por defecto (`--no-ros2` para apagarlo), y la configuración de cámara de Stella se elige o se genera según la resolución publicada. Verificado con la Logitech: imagen por ROS2 a 16.6 fps y Stella corriendo con su configuración de 640x480.
 - **Momentos estáticos** (`StaticHold`, en `src/vivo/context_gate.py`). La cámara virtual seguía avanzando con la cámara quieta, porque el streaming deriva. Ahora, con la misma regla de movimiento del analizador (flujo DIS acumulado < 25 % del paso de 36 px), la pose no avanza en esos frames y los puntos se siguen agregando a la nube. La deriva de la pausa se absorbe sin salto al reanudar. Con la Logitech quieta 70 s, el modelo derivó 0.25 unidades y la pose retenida 0. Caminando en el fablab: ningún falso estático y el mismo recorrido (2.23 % contra el croquis).
 - **Cámaras por SSH** (`src/vivo/ssh_camera.py`). Usa el método de `vigia_cam_view.py` de GARDIAN: ffmpeg MJPEG por la salida estándar del SSH. Para vigia-1 usa `y10cap`. Los equipos se descubren desde `~/.ssh/config` y los encontrados quedan recordados. Probado con la tubería local (webcam a 15 fps); los equipos remotos no estaban alcanzables, así que no se probaron. Con un equipo apagado, el error se informa y la sesión se cierra limpia.
+
+## Open3D antes del TSDF y arquitectura de grafos: poses, estructura, semántica y escena física (2026-10-14)
+
+**Pedido del usuario.** Reorganizar el pipeline geométrico para que la estabilización con Open3D ocurra **antes** de la integración TSDF, dejar GenPC para después de validar la geometría y llevar el sistema a una arquitectura jerárquica de grafos con cuatro niveles:
+- geométrico (poses);
+- estructural;
+- semántico (memoria de objetos);
+- físico (MuJoCo).
+
+Integrada con el código existente y evaluada sobre los artefactos reales. Sin commits.
+
+### Auditoría (lo que había)
+
+- **Datos por frame:** LingBot-Map guarda en `eval/<name>.npz` la profundidad, la confianza, la imagen, los intrínsecos y la pose BASIC. Nada impide reintegrar con poses corregidas.
+- **Stella y HYBRID** son solo referencias: la geometría se registra con BASIC.
+- **El TSDF** (`tsdf_mesh.py`) integra RGB-D por frame, no una nube fusionada.
+- **No había registro entre fragmentos, cierre de ciclos ni optimización global.**
+- **Tres errores encontrados durante el trabajo:**
+  - `tsdf_mesh.py` dividía `t_hit` por la norma del rayo. `create_rays_pinhole` de Open3D da direcciones con z = 1, así que `t_hit` ya es la profundidad. `inlier5` salía bajo: fablab, malla del paso 2, 0.322 → 0.428 con la fórmula corregida; error relativo mediano 7.2 % → 4.2 %. Las conclusiones del 2026-10-01 se mantienen (sigue habiendo tramos que no coinciden), pero las cifras de `inlier5` anteriores llevan ese sesgo. Corregido.
+  - Open3D rechaza en silencio un grafo de poses no conectado (con la verbosidad en Error no se veía).
+  - El SOR y ROR de Open3D con un radio único borraban superficies lejanas: 9.7 % de una escena sintética limpia.
+
+### Lo nuevo
+
+| Pieza | Archivo |
+|---|---|
+| Estabilización antes del TSDF: validación, nubes trazables, grafo de poses, filtrado relativo a la densidad, diagnóstico | `src/mapas/o3d_estable.py` (tarea `estable`) |
+| Nivel A: fragmentos solapados, odometría ICP, prior de LingBot, cierres ORB → 3D-3D → ICP validados, optimización global con poda y límites (no deformar la odometría, deriva plausible) | `src/mapas/grafo_poses.py` |
+| Nivel B: planos dominantes conexos, superficies paralelas clasificadas (posible duplicado, paralelas reales, dos caras, ambigua), adyacencias | `src/mapas/grafo_estructura.py` |
+| TSDF con la profundidad original, las poses estabilizadas y las máscaras; huella de entradas para no reintegrar sin cambios | `tsdf_mesh.py --stable --skip_if_same` (tarea `malla_e`) |
+| Comparación A/B/C/D con frames apartados | `src/mapas/comparar_geometria.py` |
+| Interfaz de evaluación de GenPC (no integrado) | `src/mapas/genpc_interfaz.py` |
+| Visor: tareas `estable` y `malla_e`, tipo «malla TSDF estabilizada (Open3D)» | `catalog.py`, `explorer.js`, `main.js`, `live_server.py` |
+
+Niveles C (memoria semántica) y D (escena física) en Pruebas_Macondo, rama `estado-dinov2-mujoco-paralingbot`.
+
+Documentación en `docs/`:
+- `ARQUITECTURA_GRAFOS_PARALINGBOT.md` (punto de entrada)
+- `GRAFO_GEOMETRICO_Y_OPTIMIZACION.md`
+- `PIPELINE_OPEN3D_TSDF.md`
+- `VALIDACION_SUPERFICIES_DUPLICADAS.md`
+- `GRAFO_SEMANTICO_Y_MEMORIA.md`
+- `VALIDACION_MUJOCO.md`
+- `CONTRATOS_ESPACIALES.md`
+- `PLAN_INTEGRACION_GENPC.md`
+
+Se eligió el grafo de poses de Open3D, y no GTSAM/iSAM2: la necesidad medida es fuera de línea, Open3D ya estaba y GTSAM no está instalado. El JSON del grafo queda listo para un grafo de factores si la optimización pasa al servidor en vivo.
+
+### Lo que se midió
+
+**Pruebas sintéticas** (`test/test_o3d_estable.py`, escenas renderizadas desde poses exactas):
+
+| Escena | Resultado |
+|---|---|
+| Deriva en la vuelta de un circuito | 33 cierres verificados. Error de las últimas 40 cámaras: 0.221 → 0.012. Superficies duplicadas: 5 → 0. Odometría intacta. |
+| Pasillo de tramos iguales | 20 cierres falsos pasaron lo visual (hasta 186 inliers) y lo geométrico (fitness 0.96), pidiendo correrse un tramo: los 20 rechazados por plausibilidad |
+| Ruido | 99.3 % de los atípicos fuera, 100 % de la superficie real conservada |
+| Puerta, obstáculo, escalón, tabique | se conservan; el tabique se clasifica como dos caras (0.142, real 0.15) |
+
+**Seis reconstrucciones reales:**
+- **Sesiones en vivo 1 y 2, streaming y windowed:** no hay revisitas verificables. La ida y la vuelta se ven en sentidos opuestos, o lo común queda lejos.
+- **Sesión 2 windowed:** la deriva de la vuelta queda detectada (~13°), pero no corregida.
+- **Fablab y desnivel offline:** 119 y 30 cierres aceptados, pero la corrección rígida rompería la odometría (6 y 5 aristas). El error entre revisitas no es rígido, lo que confirma la hipótesis del 2026-10-01.
+- **En las 6:** se conservan las poses y queda dicho por qué.
+
+**TSDF con 1 de cada 8 frames apartados.** Fablab: base 12.57 / 0.447 / 0.449, filtrada 12.63 / 0.463 / 0.337 (las mismas cifras de PSNR y SSIM que el 2026-10-04), estabilizada 12.61 / 0.447 / 0.466 (PSNR / SSIM / inlier5).
+- **Sesión 1 windowed:** la estabilizada es la mejor en `inlier5` (0.415 frente a 0.320).
+- **Sesión 1 streaming:** gana la filtrada (0.391 frente a 0.314).
+- **Espesor de pared:** sin corrección de poses no cambia, como era de esperar después del 2026-10-04: las paredes dobles son frames corridos.
+
+**MuJoCo (sesión 1).** Losas de apoyo en lugar de las envolventes de escaleras, y puertas abiertas. Colisión espuria en el recorrido: 2.8 → 1.0 % y 5.9 → 1.8 %.
+
+**Memoria semántica.** Objetos con identidad que no depende de las poses, reubicados sin DINOv2. Entre reconstrucciones, ninguna unión solo por parecido visual.
+
+**Pruebas:** 58 en ParaLingbot (50 anteriores + 8), con ROS 2 cargado para las del puente.
+
+### Limitaciones
+
+- En estos videos el grafo no corrigió nada: falta una revisita verificable o un error que sea rígido.
+- La TSDF se reintegra entera cuando cambian las poses.
+- La escala sigue sin calibrar.
+- La máscara multivista del filtro usa también la profundidad de los frames apartados.
+- Una corrida por variante y sin referencia externa.
+
+## Nubes densas estabilizadas y pruebas de punta a punta con la arquitectura de grafos (2026-10-15)
+
+**Pruebas de punta a punta.** Tres videos pasaron por todo el flujo desde Pruebas_Macondo (`run_mapeo_vivo.sh`): mapeo en vivo con Stella, filtro, windowed, estabilización de Open3D, gemelo de MuJoCo con DINOv2, memoria semántica y evaluación.
+
+| Video | Frames | Resultado del grafo de poses |
+|---|---|---|
+| Fablab | 86 | corrigió por primera vez, poco: ≤ 3.4 cm, 1.5° |
+| Desnivel | 134 | conservó |
+| Pasillo (prueba 1) | 106 | conservó |
+
+- **Fablab:** al corregir, la consistencia del filtro (de las poses BASIC) ya no se usa, y el gemelo queda sin paredes de colisión.
+- **GenPC:** no está instalado. Solo se exporta y valida su entrada (`genpc_interfaz.py`).
+- **Visor web** (`live_server.py`, websocket): verificado con las capas nuevas.
+
+**Las nubes de las sesiones nuevas eran ralas.** Comparadas con las primeras pruebas:
+- **Desnivel offline:** 735 frames, nube densa de 12.7 M.
+- **Sesiones del 14/10:** solo nubes de diagnóstico de Open3D (0.4–0.8 M) y sin `_cameras.json`.
+
+Tres causas:
+1. **El lanzador de las sesiones en vivo no pedía `nube` ni las cámaras.**
+2. **`_nube_estable.ply` es de diagnóstico:** 1 de cada 16 píxeles, vóxeles de la profundidad mediana / 150.
+3. **El vivo graba menos de 2 frames por segundo.**
+
+**Solución** (Open3D se mantiene):
+- **`export_dense_cloud.py --stable`:** la nube densa con las poses y máscaras estabilizadas. Tarea `nube_e`, que escribe `exports/estable/<name>_estable_denso.ply`.
+- **`o3d_estable.py`:** escribe `<name>_cameras.json` con las cámaras estabilizadas.
+- **Catálogo del visor:** las usa para las capas estabilizadas, y nombra «de diagnóstico» a las submuestreadas.
+- **Resultado en el desnivel en vivo:**
+
+  | Nube | Puntos |
+  |---|---|
+  | Densa | 5.6 M |
+  | Densa estabilizada | 4.0 M |
+  | Diagnóstico | 0.83 M |
+
+  La estabilizada tiene menos puntos que la densa porque el filtro quita el 56 % de los píxeles: cielo, baja confianza y bordes.
+
+**Desnivel original (735 frames) estabilizado:**
+- **Grafo de poses:** rechazó la corrección, porque deformaría 5 aristas de odometría. Conserva así la referencia espacial de las primeras pruebas.
+- **En MuJoCo,** con el modelo físico nuevo (en Pruebas_Macondo):
+  - colisión espuria en el recorrido: 9.1 → 6.7 %;
+  - recorrido sin piso: 50 → 44 %.
+
+**Pendiente:**
+1. Paredes de colisión desde el nivel B, cuando el grafo corrige.
+2. Validar las losas de apoyo contra la geometría. En el desnivel windowed en vivo causan el 10.8 % de colisión espuria.
+3. Decidir sobre GenPC: entorno propio, probablemente más de 8 GB de GPU, y solo completa objetos.
+4. TSDF por fragmentos.
+5. Escala calibrada.
+
+Traspaso completo en `docs/traspaso_2026-10-15.md` de Pruebas_Macondo (rama `estado-dinov2-mujoco-paralingbot`).
+
+## Diagnóstico de profundidad contra pose y corrección de la profundidad por frame (2026-10-15, noche)
+
+**Pregunta.** La alineación del piso hacía tocar a la mayoría de los frames el tope de 3°. ¿El error es de la profundidad, de las poses, de la escala o de los intrínsecos?
+
+**Herramienta.** `src/mapas/diagnostico_profundidad.py` (solo lee).
+- Cada frame se compara con una referencia hecha con *otros momentos* del recorrido.
+- Se ajustan, por frame y punto a plano:
+  - escala (C);
+  - escala y desfase (D);
+  - escala por fila (E);
+  - focal (F);
+  - pose rígida (P).
+- **Validación:**
+  - se ajusta con la mitad de los píxeles y se mide en la otra mitad;
+  - se repite ajustando sin el piso, para probar sobre el piso;
+  - con escenas sintéticas de error conocido, atribuye bien la causa.
+- Cada frame queda como una observación con procedencia, parámetros, incertidumbre y validación.
+
+**Qué se encontró (desnivel original, 229 frames concluyentes; windowed, 62):**
+
+| Factor | Resultado |
+|---|---|
+| Focal | **No es la causa.** LingBot-Map la predice distinta por frame (cv 8 %), pero F no reduce el error. |
+| Poses | **No son la causa principal.** Solo 64 de 229 frames admiten una corrección de pose plausible (≤ 5°). |
+| Profundidad, fuera del piso | El error **no es uniforme dentro del frame**: varía con la distancia y la fila. Una escala por frame (E o C) ajustada sin el piso explica entre el 15 y el 30 %. |
+| Escala y desfase juntos (D) | **No identificables** en la mayoría de los frames: colinealidad mediana 0.997. |
+| Piso | **Error propio**, distinto en cada frame. Nada aprendido fuera del piso lo explica. Su ajuste de profundidad degenera: escalas negativas. **El piso no se corrige por profundidad.** |
+| Alineación del piso (existente) | Mejora el piso, pero gira el frame entero: **escaleras +83 % en la windowed**. |
+| Multivía | Rechazado o dañino. |
+| Streaming en vivo | **Inconcluso**: 17 frames con revisitas. |
+
+**Implementado:**
+- **Tarea `prof` de `build_maps`** (`diagnostico_profundidad.py --corregir`).
+  - Corrige la profundidad por frame **fuera del piso** con E o C.
+  - Solo donde el ajuste es identificable, plausible (escala ±20 %) y mejora sus propios píxeles de prueba.
+  - Escribe `eval/<name>_prof.npz`: el original queda intacto y la procedencia de cada frame queda guardada. Se usa con las tareas de siempre.
+- **Lo que no cambia:** `estable` sigue siendo el modo por defecto, y MuJoCo usa las mismas poses.
+
+**Resultados.** Residuo entre visitas contra el original (menos de 1 = mejora):
+
+| Reconstrucción | Método | Pared | Escalera | Otro | Piso |
+|---|---|---|---|---|---|
+| Original | profundidad corregida | 0.75 | 0.66 | 0.71 | 0.96 |
+| | **+ piso alineado** | 0.74 | 0.78 | 0.85 | **0.55** |
+| Windowed | profundidad corregida | 0.88 | 0.61 | 0.94 | 1.00 |
+| | + piso alineado | 0.94 | 1.21 | 1.15 | 0.55 |
+
+- **En el original,** la combinación también deja las superficies un 19 % más finas, y el piso con 41 % de celdas separadas contra 82 %.
+- **En la windowed,** la combinación todavía empeora escaleras y objetos. La alineación del piso debería aceptarse solo si el diagnóstico confirma que no empeora ningún grupo: es el siguiente paso.
+
+**Pruebas:** 64 (3 nuevas). Detalle en `docs/DIAGNOSTICO_PROFUNDIDAD.md`.
+
+## Piso1 fuera de línea: windowed contra streaming, todos los frames, y el grafo de poses de Open3D a 4 grados de libertad (2026-10-17)
+
+**Pedido del usuario** (desde Pruebas_Macondo):
+- reprocesar el video `prueba_indoor_piso1.mp4` (45 s, vertical, 1351 frames) con todos sus frames en vez de los 69 de la sesión en vivo;
+- intentar que el grafo de poses de Open3D sirva como corrector.
+
+Sin commits.
+
+**Incidente de entorno, reparado.** La instalación de GenPC del 2026-10-16 (micromamba, Python 3.10) desinstaló de `~/.local` torch 2.12.0, torchvision 0.27.0, triton 3.7.0 y sympy 1.14.0: pip veía el sitio de usuario desde el entorno. Eso dejaba sin torch al `python3` del sistema y a todo ParaLingbot, incluido el vivo. Se reinstalaron con `pip install --user --no-deps` desde el índice cu130. Cualquier `pip` en ese entorno necesita `PYTHONNOUSERSITE=1`.
+
+**Mapeo fuera de línea** (el flujo del README: candidatos, `analyze_frames`, `curate_and_synthesize --spacing time --no_synth`, `process_and_view`):
+
+| 453 frames (stride 3) | Piso bajo la cámara: giro inicial / caminando | Salto | Dispersión de escala |
+|---|---|---|---|
+| windowed, ventana 16 | +0.86 / −0.10 | **0.96** | 2.68 |
+| streaming | +0.39 / +0.34 | **0.05** | 1.37 |
+
+- **El video empieza con 22 s de giro casi en el lugar.** Windowed deja ese tramo casi un metro por encima del resto (el 80 % de las celdas de piso quedan en capas); streaming no. Con una sola prueba no cambia la recomendación general (windowed), pero conviene medir el salto de piso antes de confiar en un mapa windowed.
+- **Todos los frames (stride 1, 1358):** `--keyframe_interval 6` mantiene la misma cadencia de keyframes que la corrida de 453 (unos 5 por segundo de video). La inferencia entra (656 s), pero el guardado murió por RAM. `process_and_view.py` armaba las imágenes uint8 desde una copia float32 de todas a la vez; ahora las convierte por bloques de 64.
+
+**Grafo de nivel B en el mapa en streaming.** Clasificó casi todo como horizontal: 35 "piso" con semántica de pared y 2 paredes. El filtro geométrico, sobre las mismas poses, encontró 19 tramos de pared. No se investigó la causa.
+
+**Grafo de poses (nivel A) sobre el mapa en streaming de 453 frames.** Todas las variantes se compararon con el mismo filtrado:
+
+| Variante | Resultado | Duplicadas (separación) | Piso entre visitas (mediana) |
+|---|---|---|---|
+| Poses de LingBot | — | 0.116 | 0.032 |
+| multiway | rechazado: 13.5° entre vecinos | — | — |
+| verificado, 6 GDL | rechazado (3 odometrías); aceptado a la fuerza: ajuste 0.735 → 0.767 | **0.103** | 0.045 (**+40 %**) |
+| verificado, 4 GDL (`--dof4`) | ajuste 0.735 → 0.753; rechazado por no mejorar la consistencia | igual | igual |
+
+- **multiway:** 248 de sus 387 "cierres" aceptados unen fragmentos a menos de unos 4 s. El ICP los mide 4-10° distinto de LingBot, y con preferencia de cierre ×2 tuercen la solución. Además, 13 odometrías ICP se descartaron por giros de hasta 39°.
+- **verificado:** 31 cierres verificados estiman una deriva de unos 14°. La corrección de 6 GDL mejora algo las paredes inclinando fragmentos: la altura de la cámara pasa de un rango de 0.13 a 0.30 y el piso empeora.
+- **`--dof4` (nuevo, apagado por defecto):** las aristas prior de LingBot llevan una información anisótropa, rígida en la inclinación y la altura. Así el optimizador de Open3D solo corrige rumbo y desplazamiento horizontal. Un test lo comprueba con un grafo real.
+  - **Intento previo descartado:** proyectar la solución de 6 GDL a 4 desparejaba a los vecinos.
+  - **En piso1:** la corrección de rumbo apenas mejora la consistencia, coherente con el diagnóstico del 2026-10-15 (el error entre visitas es de profundidad, no de pose).
+  - **Para qué queda:** recorridos con revisitas de verdad (circuito, lazo), que siguen pendientes.
+
+**Archivos:**
+- `src/captura/process_and_view.py`: conversión de imágenes por bloques.
+- `src/mapas/grafo_poses.py`: `prior_information`.
+- `src/mapas/o3d_estable.py`: `dof4`, `dof4_rigidez`.
+- `test/test_o3d_estable.py`: test de 4 GDL.
+
+El gemelo, la validación de paredes y el X2 están en Pruebas_Macondo (`videos/LEEME.md`).
+
+## Piso1 con la arquitectura completa fuera de línea, como etapa 1 del proceso por capas de Macondo (2026-10-17, noche)
+
+**Pedido del usuario:** el mapeo nunca debe usar LingBot-Map solo. Debe pasar siempre por las herramientas de ParaLingbot que estabilizan la nube y mantienen la referencia espacial (Stella, filtros geométricos, inferencia por flujo óptico). Es la etapa 1 de un proceso por capas, regla permanente del gemelo de Pruebas_Macondo (`docs/proceso_por_capas.md` de ese repo).
+
+**Etapa 1:** `replay_live.py` sin tiempo real sobre todo el video, con:
+- `--context --synth` (analizador por flujo óptico DIS, con intermedios ×1 solo como contexto);
+- *static hold*;
+- `--ros2` con Stella (configuración nueva `src/ros/stella/piso1_portrait_540x960.yaml`: focal 754 px, la mediana de LingBot reescalada a 540×960);
+- `--tracking_mode hybrid --register_with_reference`, con el reparto de CPU del benchmark.
+
+**Resultado:**
+- 422 frames al modelo de los 1351 del video, a 1.27 frames/s.
+- **Stella:** recibió los 1351 frames, pero solo dio 73 poses: 72 frames en Tracking, 161 inicializando y 99 perdida.
+- **HYBRID:** usó la pose de Stella en **3 de 422 frames**; en el resto volvió sola a la de LingBot (Stella desconocida, inicializando, perdida o famélica).
+- **Static hold:** 2 frames.
+
+En este video, grabado a mano con desenfoque y giros rápidos, Stella aporta poco, como ya se había visto en vivo (2026-10-04, etapa 2).
+
+**Etapas 2 y 3** (`build_maps filtro,estable,nube_e,malla_e`): 18 tramos de pared y 1 nivel de piso. El grafo verificado conservó las poses (corregir doblaba 1 odometría). Nube densa estabilizada de 18.2 M puntos; malla de 1.6 M triángulos.
+
+**Limpieza:** se borraron `captures/pruebas_reales/indoor/prueba_piso1_denso/` (11 GB: los mapeos windowed y streaming de 453 frames, el de 1358 y los experimentos del grafo) y la sesión en vivo `sesion_20261016_162931`. Sus resultados quedan en la sección anterior de esta bitácora. La sesión vigente es `captures/pruebas_reales/indoor/prueba_piso1_capas/`.
+
+## La ruta deformada por el analizador de contexto, e ICP robusto en el grafo de poses (2026-10-17, noche)
+
+**Pedido del usuario:** la ruta del proceso por capas había quedado muy mal, con objetos en espacios donde no había nada y la geometría deformada. Pidió usar la ruta de LingBot, a la que Open3D se acercaba mucho, y corregir su error con ICP punto a plano robusto y optimización global del grafo de poses con cierre de bucle por Levenberg-Marquardt.
+
+**Causa.** En la sesión de la etapa 1, HYBRID y BASIC daban la misma ruta (diferencia máxima 0.13; Stella intervino en 3 frames), y las dos estaban mal: un lazo que no existe y 14 saltos de más de 5 veces el paso mediano. Lo que la deformó fue la entrada, es decir el analizador de contexto (frames por movimiento, con pasos de tiempo desiguales) más los frames sintéticos. Repite lo medido el 2026-10-04: el analizador empeora los recorridos rápidos.
+
+**Corrección:**
+- **Etapa 1:** `replay_live.py --stride 3 --keyframe_interval 2`, cadencia uniforme de 10 frames/s, con Stella (HYBRID) y *static hold*, sin analizador ni frames sintéticos.
+  - **Ruta:** un pasillo de ida y vuelta en que la vuelta se superpone a la ida.
+  - **Stella:** aportó la pose en 43 de 451 frames.
+- **Etapa 2:** ICP punto a plano robusto (Tukey) y grafo de poses a 4 grados de libertad (`docs/GRAFO_GEOMETRICO_Y_OPTIMIZACION.md`).
+  - **Mediciones:** 101 odometrías aceptadas y 14 cierres.
+  - **Corrección:** rechazada por 1 odometría, así que se conserva la ruta de LingBot.
+
+**Archivos:**
+- `src/mapas/grafo_poses.py`: `point_to_plane`, `prior_information`.
+- `src/mapas/o3d_estable.py`: `icp_tukey_rel`, `dof4`, `dof4_rigidez`.
+- `src/mapas/build_maps.py`: `O3D_ESTABLE_ARGS`.
+
+Las 12 pruebas de `test/test_o3d_estable.py` pasan con el núcleo robusto por defecto, incluida la de la deriva en un circuito.
+
+**En curso (Pruebas_Macondo):**
+- grafos y laplacianos por etapa para verificar la convergencia;
+- objetos por cortes espectrales, completados con un GenPC pequeño en lugar de la recuperación de modelos 3D;
+- la comparativa entre las dos variantes.
 
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.

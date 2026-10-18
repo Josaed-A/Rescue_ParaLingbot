@@ -16,13 +16,32 @@ coincidencia baja (paredes "dobles" o engrosadas).
 
     python src/mapas/tsdf_mesh.py eval/mapa.npz --out exports/mapa_malla
       -> mapa_malla.ply (malla completa) + mapa_malla.glb (para el visor) + mapa_malla_info.json
+
+Con --stable <..._estable.npz> (o3d_estable.py: grafo de poses + filtrado de Open3D) cada frame se integra con
+su profundidad ORIGINAL, la pose estabilizada y la máscara de Open3D: la estabilización ocurre antes del TSDF y
+no se arma una secuencia RGB-D falsa a partir de una nube. Se comprueba que el archivo sea de esta misma
+reconstrucción (mismas poses de entrada y mismos frames). Con --skip_if_same no se reintegra si las entradas
+(npz, poses, máscaras y parámetros) son las mismas que las de la malla ya guardada.
 """
 import argparse
+import hashlib
 import json
+import os
 import time
 
 import numpy as np
 import open3d as o3d
+
+
+def ray_depth(rays, t_hit, c2w):
+    """Profundidad z (de cámara) de cada impacto. create_rays_pinhole de Open3D NO normaliza las direcciones:
+    cada una es R K^-1 (u+0.5, v+0.5, 1), con componente z = 1 en la cámara, así que t_hit ya es z. Hasta el
+    2026-10-14 se dividía t_hit por la norma de la dirección y la profundidad de la malla quedaba hasta ~30 %
+    corta en las esquinas: inlier5 salía más bajo (fablab, malla del paso 2: 0.322 en vez de 0.428). Se usa la
+    componente z de cada dirección en vez de suponerla 1."""
+    dirs = rays.numpy()[..., 3:]
+    dz = dirs @ np.asarray(c2w)[:3, :3][:, 2]
+    return t_hit * dz
 
 
 def main():
@@ -52,7 +71,14 @@ def main():
     ap.add_argument("--select_frames", action="store_true", help="con --filter: integrar solo los frames elegidos")
     ap.add_argument("--glb_max_tris", type=int, default=3_000_000,
                     help="la .glb para el navegador se simplifica a este máximo")
+    ap.add_argument("--stable", default=None,
+                    help="<..>_estable.npz de o3d_estable.py: poses estabilizadas y máscaras de Open3D")
+    ap.add_argument("--skip_if_same", action="store_true",
+                    help="no reintegrar si la malla guardada tiene la misma huella de entradas")
     a = ap.parse_args()
+    if a.stable and a.filter:
+        ap.error("--stable y --filter no se combinan: las máscaras y el ajuste a planos del filtro se calcularon "
+                 "con las poses originales (o3d_estable.py ya toma su semántica)")
 
     t0 = time.time()
     d = np.load(a.npz)
@@ -72,6 +98,45 @@ def main():
         E = np.eye(4)
         E[:3, :4] = d["extrinsic"][i]
         poses[int(i)] = (np.linalg.inv(E), 1.0)
+
+    stable = None
+    if a.stable:
+        sz = np.load(a.stable)
+        smeta = json.loads(str(sz["meta"]))
+        orig = np.array([poses[int(i)][0] for i in real], np.float32)
+        if not np.array_equal(sz["real"], real) or np.abs(sz["c2w_original"] - orig).max() > 1e-4:
+            raise SystemExit(f"{a.stable} es de otra reconstrucción: sus frames o sus poses de entrada no coinciden "
+                             f"con {a.npz}")
+        s_ = int(sz["stride"])
+        H0, W0 = depth_all.shape[1:3]
+        stable = {"keep": sz["keep"], "stride": s_, "pos": {int(r): k for k, r in enumerate(real)}, "meta": smeta,
+                  "shape": (H0, W0), "fkeep": None}
+        if smeta.get("mascara_filtro"):
+            # Consistencia multivista del filtro (sin su ajuste a planos), solo si sus poses son las estabilizadas.
+            fz = np.load(smeta["mascara_filtro"])
+            if not np.array_equal(fz["real"], real) or np.abs(fz["c2w_fix"] - sz["c2w"]).max() > 1e-4:
+                raise SystemExit(f"la máscara del filtro {smeta['mascara_filtro']} no es de las poses estabilizadas")
+            stable["fkeep"] = fz["keep"]
+        poses_orig = dict(poses)
+        for k, r in enumerate(real):
+            poses[int(r)] = (sz["c2w"][k].astype(np.float64), 1.0)
+        print(f"estabilización Open3D: {a.stable} (poses {smeta['version_poses']}, máscara {smeta['huella_mascara']})")
+
+    fp_parts = [os.path.abspath(a.npz), hashlib.sha1(np.ascontiguousarray(d["extrinsic"][real]).tobytes()).hexdigest(),
+                json.dumps({k: v for k, v in vars(a).items() if k not in ("out", "skip_if_same")}, sort_keys=True)]
+    if stable is not None:
+        fp_parts += [stable["meta"]["version_poses"], stable["meta"]["huella_mascara"]]
+    if a.filter:
+        fp_parts.append(hashlib.sha1(open(a.filter, "rb").read()).hexdigest())
+    fingerprint = hashlib.sha1("|".join(fp_parts).encode()).hexdigest()[:16]
+    if a.skip_if_same and os.path.isfile(a.out + "_info.json") and os.path.isfile(a.out + ".glb"):
+        try:
+            prev = json.load(open(a.out + "_info.json")).get("huella_entradas")
+        except Exception:
+            prev = None
+        if prev == fingerprint:
+            print(f"sin cambios en las entradas (huella {fingerprint}): no se reintegra {a.out}")
+            return
 
     def frame(i):
         dep = depth_all[i].astype(np.float32)
@@ -99,6 +164,15 @@ def main():
         """Profundidad con la que se construye: la original filtrada por confianza y, con
         --filter, sin los píxeles descartados y llevada a los planos donde corresponde."""
         dep = frame(i)
+        if stable is not None:
+            s_ = stable["stride"]
+            H0, W0 = stable["shape"]
+            kp = stable["keep"][stable["pos"][i]]
+            # Cada píxel toma la celda de la grilla de stride que lo contiene (la última cubre el borde).
+            m = kp[np.minimum(np.arange(H0) // s_, kp.shape[0] - 1)][:, np.minimum(np.arange(W0) // s_, kp.shape[1] - 1)]
+            if stable["fkeep"] is not None:
+                m = m & stable["fkeep"][stable["pos"][i]]
+            dep = np.where(m, dep, 0).astype(np.float32)
         if flt is not None:
             k = flt["pos"][i]
             if flt["snap"] is not None:
@@ -142,8 +216,7 @@ def main():
             rays = scene.create_rays_pinhole(o3d.core.Tensor(K.astype(np.float64)),
                                              o3d.core.Tensor(np.linalg.inv(c2w)), W, H)
             t_hit = scene.cast_rays(rays)["t_hit"].numpy()
-            ys, xs = np.mgrid[0:H, 0:W]
-            z_mesh = t_hit / np.sqrt(((xs - K[0, 2]) / K[0, 0]) ** 2 + ((ys - K[1, 2]) / K[1, 1]) ** 2 + 1)
+            z_mesh = ray_depth(rays, t_hit, c2w)
             dp = frame(i) * sc
             ok = (dp > 0) & (dp < dmax * sc)
             hit = ok & np.isfinite(z_mesh)
@@ -192,8 +265,7 @@ def main():
             ps.append(-10 * np.log10(max(mse, 1e-10)))
             ss.append(float(ssim_t(torch.from_numpy(img).permute(2, 0, 1)[None].float(),
                                    torch.from_numpy(gt).permute(2, 0, 1)[None].float())))
-            ys, xs = np.mgrid[0:H, 0:W]
-            z_mesh = t_hit / np.sqrt(((xs - K[0, 2]) / K[0, 0]) ** 2 + ((ys - K[1, 2]) / K[1, 1]) ** 2 + 1)
+            z_mesh = ray_depth(rays, t_hit, c2w)
             dp = frame(i)
             ok = (dp > 0) & hitm
             inl.append(float((np.abs(z_mesh[ok] - dp[ok]) / dp[ok] < 0.05).mean()) if ok.any() else 0.0)
@@ -211,7 +283,12 @@ def main():
         print(f"selección de frames: {len(ids)} frames para la malla")
     mesh, n_raw = integrate(ids)
     res = agreement(mesh, ids)
-    info = {"npz": a.npz, "filter": a.filter, "snap": bool(a.filter and not a.no_snap),
+    info = {"npz": a.npz, "filter": a.filter, "stable": a.stable, "huella_entradas": fingerprint,
+            "tipo_geometria": ("integrada TSDF de observaciones registradas y filtradas con Open3D" if stable is not None
+                               else "integrada TSDF de las observaciones con sus poses originales"),
+            "version_poses": stable["meta"]["version_poses"] if stable is not None else None,
+            "mascara_filtro": stable["meta"].get("mascara_filtro") if stable is not None else None,
+            "snap": bool(a.filter and not a.no_snap),
             "select_frames": bool(a.filter and a.select_frames), "frames": len(ids), "voxel": voxel, "sdf_trunc": a.trunc_voxels * voxel,
             "depth_median": med, "depth_max_used": dmax, "conf_threshold": cthr,
             "pass1": {"triangles": int(len(mesh.triangles)), **summary(res)}}
@@ -269,7 +346,7 @@ def main():
     if test_ids:
         info["test"] = novel_views(mesh, test_ids)
         print("frames apartados:", info["test"])
-        if aligned:
+        if aligned or stable is not None:
             cur = dict(poses)
             poses.update(poses_orig)
             info["test_original_poses"] = novel_views(mesh, test_ids)

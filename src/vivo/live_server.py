@@ -1396,8 +1396,8 @@ def build_app(captures_dir, model_path):
             pdir = catalog.resolve_prueba(req.app["captures_dir"], b.get("prueba", ""))
         except ValueError as e:
             return bad(e)
-        tasks = [t for t in b.get("tasks", []) if t in ("windowed", "filtro", "nube", "alta", "cruda", "malla", "malla_f",
-                                                         "splat", "splat_f", "video")]
+        tasks = [t for t in b.get("tasks", []) if t in ("windowed", "filtro", "prof", "estable", "nube", "nube_e", "alta", "cruda", "malla",
+                                                         "malla_f", "malla_e", "multiway", "nube_m", "malla_m", "piso", "nube_p", "malla_p", "splat", "splat_f", "video")]
         if not tasks:
             return bad("no hay tareas válidas")
         await jobs.start(pdir, b["prueba"], b.get("npz"), tasks)

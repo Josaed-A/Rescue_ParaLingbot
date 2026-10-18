@@ -1,0 +1,39 @@
+# Stella-VSLAM, monocular: prueba indoor piso1 (celular en vertical), 540x960.
+# INTRÍNSECOS ESTIMADOS, NO CALIBRADOS: fx = fy = 754 es la focal mediana que predice LingBot-Map en piso1
+# (723 sobre el recorte de 518), reescalada a 540 de ancho; principal en el centro; sin distorsión. El resto de
+# los parámetros, como unisabana_portrait_540x960.yaml. Debe recibir la imagen YA ROTADA como la ve LingBot.
+
+Camera:
+  name: "teléfono en vertical, videos unisabana prueba_2/prueba_3 (540x960)"
+  setup: "monocular"
+  model: "perspective"
+  fx: 754.0
+  fy: 754.0
+  cx: 270.0
+  cy: 480.0
+  k1: 0.0
+  k2: 0.0
+  p1: 0.0
+  p2: 0.0
+  k3: 0.0
+  fps: 10.0
+  cols: 540
+  rows: 960
+  color_order: "RGB"
+
+Preprocessing:
+  min_size: 800
+
+Feature:
+  name: "default ORB feature extraction setting"
+  scale_factor: 1.2
+  num_levels: 8
+  ini_fast_threshold: 20
+  min_fast_threshold: 7
+
+Mapping:
+  baseline_dist_thr_ratio: 0.02
+  redundant_obs_ratio_thr: 0.9
+  num_covisibilities_for_landmark_generation: 20
+  num_covisibilities_for_landmark_fusion: 20
+

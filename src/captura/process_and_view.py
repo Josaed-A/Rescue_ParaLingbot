@@ -212,11 +212,17 @@ def main():
 
     if args.save_predictions:
         ds = max(1, args.save_ds)
+        # a uint8 por bloques: de una vez, la copia float32 temporal de todas las imágenes (4.4 GB con 1358 frames
+        # a 518x518) llevaba el proceso al tope de RAM
+        src = vis_dict["images"][:, :, ::ds, ::ds]
+        images_u8 = np.empty((src.shape[0], src.shape[2], src.shape[3], 3), np.uint8)
+        for i in range(0, len(src), 64):
+            images_u8[i:i + 64] = (src[i:i + 64].transpose(0, 2, 3, 1) * 255).astype(np.uint8)
         np.savez(
             args.save_predictions,
             depth=vis_dict["depth"][:, ::ds, ::ds, 0].astype(np.float16),
             depth_conf=vis_dict["depth_conf"][:, ::ds, ::ds].astype(np.float16),
-            images=(vis_dict["images"][:, :, ::ds, ::ds].transpose(0, 2, 3, 1) * 255).astype(np.uint8),
+            images=images_u8,
             extrinsic=vis_dict["extrinsic"].astype(np.float32),
             intrinsic=vis_dict["intrinsic"].astype(np.float32),
             ds=ds, is_real=is_real, source_index=source_index,
