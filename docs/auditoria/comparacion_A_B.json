@@ -1,0 +1,556 @@
+[
+ {
+  "escena": "piso1_capas",
+  "fisico": {
+   "geoms_colision": {
+    "paredes": 0,
+    "losas": 5,
+    "soporte": 6,
+    "envolventes": 61,
+    "muros_nivel_b": 0,
+    "muros_filtro": 11,
+    "muros_dinov2": 16,
+    "losas_nivel_b": 0,
+    "piezas_modelos": 37,
+    "piezas_genpc": 0,
+    "objetos": 44
+   },
+   "recorrido_m": 19.9,
+   "frac_recorrido_obstruido": 0.0,
+   "obstruido_por_tipo": {},
+   "geoms_que_obstruyen": [],
+   "camara_sobre_piso_colision_m": {
+    "mediana": 1.11,
+    "frac_fuera_de_mano": 0.038
+   },
+   "huella_envolventes_sobre_voxeles": 1.47
+  },
+  "muebles": [
+   {
+    "mueble": "sofa_1",
+    "clase": "sofá",
+    "piezas": 1,
+    "volumen_m3": 0.2586723636280872,
+    "cobertura": 1.0,
+    "invasion": 0.4675,
+    "invasion_sobre_observado": -0.23649999999999993
+   },
+   {
+    "mueble": "silla_1",
+    "clase": "silla",
+    "piezas": 1,
+    "volumen_m3": 0.12733733504036596,
+    "cobertura": 1.0,
+    "invasion": 0.9475,
+    "invasion_sobre_observado": -0.05249999999999999
+   },
+   {
+    "mueble": "silla_2",
+    "clase": "silla",
+    "piezas": 1,
+    "volumen_m3": 0.13421886195312252,
+    "cobertura": 1.0,
+    "invasion": 1.0,
+    "invasion_sobre_observado": 0.08866666666666667
+   },
+   {
+    "mueble": "silla_3",
+    "clase": "silla",
+    "piezas": 21,
+    "volumen_m3": 0.8840833944622918,
+    "cobertura": 0.8843333333333333,
+    "invasion": 0.36345238095238097,
+    "invasion_sobre_observado": 0.17311904761904764
+   },
+   {
+    "mueble": "mesa_1",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.13636702890395638,
+    "cobertura": 1.0,
+    "invasion": 0.825,
+    "invasion_sobre_observado": 0.026666666666666616
+   },
+   {
+    "mueble": "mesa_2",
+    "clase": "mesa",
+    "piezas": 7,
+    "volumen_m3": 0.2769838914904468,
+    "cobertura": 1.0,
+    "invasion": 0.82,
+    "invasion_sobre_observado": -0.08700000000000008
+   },
+   {
+    "mueble": "mesa_3",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.03268827911930121,
+    "cobertura": 1.0,
+    "invasion": 1.0,
+    "invasion_sobre_observado": 0.0
+   },
+   {
+    "mueble": "mesa_4",
+    "clase": "mesa",
+    "piezas": 12,
+    "volumen_m3": 0.41885417972079303,
+    "cobertura": 0.7343333333333333,
+    "invasion": 0.3308333333333333,
+    "invasion_sobre_observado": 0.15883333333333333
+   },
+   {
+    "mueble": "mueble_1",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.09260412957208777,
+    "cobertura": 0.9936666666666667,
+    "invasion": 0.225,
+    "invasion_sobre_observado": 0.21466666666666667
+   },
+   {
+    "mueble": "mueble_2",
+    "clase": "mueble",
+    "piezas": 8,
+    "volumen_m3": 0.549138585011794,
+    "cobertura": 1.0,
+    "invasion": 0.8596875,
+    "invasion_sobre_observado": -0.0863124999999999
+   },
+   {
+    "mueble": "mueble_3",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.14777326351423925,
+    "cobertura": 1.0,
+    "invasion": 0.6825,
+    "invasion_sobre_observado": 0.059833333333333294
+   },
+   {
+    "mueble": "mueble_4",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.031624992064667574,
+    "cobertura": 1.0,
+    "invasion": 0.4375,
+    "invasion_sobre_observado": 0.22283333333333333
+   },
+   {
+    "mueble": "mueble_5",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.018881635694246276,
+    "cobertura": 1.0,
+    "invasion": 0.905,
+    "invasion_sobre_observado": -0.09299999999999997
+   },
+   {
+    "mueble": "mueble_6",
+    "clase": "mueble",
+    "piezas": 7,
+    "volumen_m3": 0.3778124121035109,
+    "cobertura": 1.0,
+    "invasion": 0.6946428571428571,
+    "invasion_sobre_observado": 0.035976190476190495
+   },
+   {
+    "mueble": "mueble_7",
+    "clase": "mueble",
+    "piezas": 7,
+    "volumen_m3": 0.45174252463126113,
+    "cobertura": 1.0,
+    "invasion": 0.22785714285714287,
+    "invasion_sobre_observado": 0.21452380952380953
+   },
+   {
+    "mueble": "electrodomestico_1",
+    "clase": "electrodoméstico",
+    "piezas": 1,
+    "volumen_m3": 1.0966751798642176,
+    "cobertura": 1.0,
+    "invasion": 0.53,
+    "invasion_sobre_observado": 0.3513333333333334
+   },
+   {
+    "mueble": "electrodomestico_2",
+    "clase": "electrodoméstico",
+    "piezas": 1,
+    "volumen_m3": 0.14220835830816264,
+    "cobertura": 0.9866666666666667,
+    "invasion": 0.175,
+    "invasion_sobre_observado": 0.017666666666666664
+   },
+   {
+    "mueble": "electrodomestico_3",
+    "clase": "electrodoméstico",
+    "piezas": 1,
+    "volumen_m3": 0.05793746969514181,
+    "cobertura": 0.7246666666666667,
+    "invasion": 0.4325,
+    "invasion_sobre_observado": 0.17483333333333334
+   }
+  ],
+  "resumen": {
+   "cobertura_mediana": 1.0,
+   "invasion_sobre_observado_mediana": 0.047904761904761894,
+   "volumen_total_m3": 5.235603884777695
+  }
+ },
+ {
+  "escena": "piso1_capas_genpc",
+  "fisico": {
+   "geoms_colision": {
+    "paredes": 0,
+    "losas": 5,
+    "soporte": 6,
+    "envolventes": 95,
+    "muros_nivel_b": 0,
+    "muros_filtro": 11,
+    "muros_dinov2": 16,
+    "losas_nivel_b": 0,
+    "piezas_modelos": 0,
+    "piezas_genpc": 6,
+    "objetos": 72
+   },
+   "recorrido_m": 19.9,
+   "frac_recorrido_obstruido": 0.0,
+   "obstruido_por_tipo": {},
+   "geoms_que_obstruyen": [],
+   "camara_sobre_piso_colision_m": {
+    "mediana": 1.11,
+    "frac_fuera_de_mano": 0.038
+   },
+   "huella_envolventes_sobre_voxeles": 1.49
+  },
+  "muebles": [
+   {
+    "mueble": "electrodomestico_1",
+    "clase": "electrodoméstico",
+    "piezas": 1,
+    "volumen_m3": 0.028104166898028485,
+    "cobertura": 1.0,
+    "invasion": 0.1725,
+    "invasion_sobre_observado": 0.15749999999999997
+   },
+   {
+    "mueble": "electrodomestico_2",
+    "clase": "electrodoméstico",
+    "piezas": 1,
+    "volumen_m3": 0.02525000218748834,
+    "cobertura": 1.0,
+    "invasion": 0.5725,
+    "invasion_sobre_observado": 0.32183333333333336
+   },
+   {
+    "mueble": "mueble_1",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.3344421137731433,
+    "cobertura": 1.0,
+    "invasion": 0.335,
+    "invasion_sobre_observado": 0.29300000000000004
+   },
+   {
+    "mueble": "electrodomestico_3",
+    "clase": "electrodoméstico",
+    "piezas": 1,
+    "volumen_m3": 0.16159750345172919,
+    "cobertura": 1.0,
+    "invasion": 0.835,
+    "invasion_sobre_observado": 0.528
+   },
+   {
+    "mueble": "electrodomestico_4",
+    "clase": "electrodoméstico",
+    "piezas": 1,
+    "volumen_m3": 0.6441875439454656,
+    "cobertura": 1.0,
+    "invasion": 0.4625,
+    "invasion_sobre_observado": 0.3205
+   },
+   {
+    "mueble": "electrodomestico_5",
+    "clase": "electrodoméstico",
+    "piezas": 1,
+    "volumen_m3": 0.12642744475535067,
+    "cobertura": 1.0,
+    "invasion": 0.275,
+    "invasion_sobre_observado": 0.12200000000000003
+   },
+   {
+    "mueble": "electrodomestico_6",
+    "clase": "electrodoméstico",
+    "piezas": 1,
+    "volumen_m3": 0.11018750788388157,
+    "cobertura": 1.0,
+    "invasion": 0.395,
+    "invasion_sobre_observado": 0.054333333333333345
+   },
+   {
+    "mueble": "silla_1",
+    "clase": "silla",
+    "piezas": 1,
+    "volumen_m3": 0.10028427109712512,
+    "cobertura": 1.0,
+    "invasion": 0.915,
+    "invasion_sobre_observado": -0.08499999999999996
+   },
+   {
+    "mueble": "mesa_1",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.018642844075069644,
+    "cobertura": 1.0,
+    "invasion": 0.92,
+    "invasion_sobre_observado": -0.0030000000000000027
+   },
+   {
+    "mueble": "mesa_2",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.008554369433450002,
+    "cobertura": 1.0,
+    "invasion": 1.0,
+    "invasion_sobre_observado": 0.0
+   },
+   {
+    "mueble": "mesa_3",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.02782560030014976,
+    "cobertura": 1.0,
+    "invasion": 0.8275,
+    "invasion_sobre_observado": 0.2808333333333334
+   },
+   {
+    "mueble": "mesa_4",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.050384296443254775,
+    "cobertura": 1.0,
+    "invasion": 0.7475,
+    "invasion_sobre_observado": 0.11416666666666675
+   },
+   {
+    "mueble": "mesa_5",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.0162864807284282,
+    "cobertura": 1.0,
+    "invasion": 0.975,
+    "invasion_sobre_observado": -0.0050000000000000044
+   },
+   {
+    "mueble": "mesa_6",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.01369135266185435,
+    "cobertura": 1.0,
+    "invasion": 0.99,
+    "invasion_sobre_observado": -0.010000000000000009
+   },
+   {
+    "mueble": "mueble_2",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.038866437873889166,
+    "cobertura": 1.0,
+    "invasion": 0.995,
+    "invasion_sobre_observado": -0.0050000000000000044
+   },
+   {
+    "mueble": "mesa_7",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.012572022394793016,
+    "cobertura": 1.0,
+    "invasion": 1.0,
+    "invasion_sobre_observado": 0.0
+   },
+   {
+    "mueble": "mesa_8",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.07632793525380975,
+    "cobertura": 1.0,
+    "invasion": 1.0,
+    "invasion_sobre_observado": 0.0
+   },
+   {
+    "mueble": "mueble_3",
+    "clase": "mueble",
+    "piezas": 10,
+    "volumen_m3": 0.4958984600075929,
+    "cobertura": 1.0,
+    "invasion": 0.907,
+    "invasion_sobre_observado": -0.02733333333333332
+   },
+   {
+    "mueble": "mueble_4",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.026282934674079106,
+    "cobertura": 1.0,
+    "invasion": 1.0,
+    "invasion_sobre_observado": 0.0
+   },
+   {
+    "mueble": "mesa_9",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.0457710780616737,
+    "cobertura": 1.0,
+    "invasion": 0.7525,
+    "invasion_sobre_observado": 0.16483333333333328
+   },
+   {
+    "mueble": "silla_2",
+    "clase": "silla",
+    "piezas": 1,
+    "volumen_m3": 0.01888142433605631,
+    "cobertura": 1.0,
+    "invasion": 1.0,
+    "invasion_sobre_observado": 0.0
+   },
+   {
+    "mueble": "mueble_5",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.04082705782167514,
+    "cobertura": 1.0,
+    "invasion": 0.77,
+    "invasion_sobre_observado": 0.008333333333333304
+   },
+   {
+    "mueble": "mueble_6",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.016437501958726664,
+    "cobertura": 1.0,
+    "invasion": 0.4675,
+    "invasion_sobre_observado": 0.16316666666666668
+   },
+   {
+    "mueble": "mueble_7",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.13462673941620487,
+    "cobertura": 1.0,
+    "invasion": 0.82,
+    "invasion_sobre_observado": 0.1379999999999999
+   },
+   {
+    "mueble": "silla_3",
+    "clase": "silla",
+    "piezas": 1,
+    "volumen_m3": 0.10991919578967713,
+    "cobertura": 1.0,
+    "invasion": 1.0,
+    "invasion_sobre_observado": 0.09433333333333338
+   },
+   {
+    "mueble": "mesa_10",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.008310408614117862,
+    "cobertura": 1.0,
+    "invasion": 1.0,
+    "invasion_sobre_observado": 0.0
+   },
+   {
+    "mueble": "mesa_11",
+    "clase": "mesa",
+    "piezas": 1,
+    "volumen_m3": 0.02853034314837452,
+    "cobertura": 1.0,
+    "invasion": 1.0,
+    "invasion_sobre_observado": 0.0
+   },
+   {
+    "mueble": "mueble_8",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.010335865392422709,
+    "cobertura": 1.0,
+    "invasion": 0.46,
+    "invasion_sobre_observado": 0.13233333333333336
+   },
+   {
+    "mueble": "electrodomestico_7",
+    "clase": "electrodoméstico",
+    "piezas": 1,
+    "volumen_m3": 0.0567500178313737,
+    "cobertura": 1.0,
+    "invasion": 0.465,
+    "invasion_sobre_observado": 0.21700000000000003
+   },
+   {
+    "mueble": "sofa_1",
+    "clase": "sofá",
+    "piezas": 1,
+    "volumen_m3": 0.10981714350464603,
+    "cobertura": 1.0,
+    "invasion": 0.5375,
+    "invasion_sobre_observado": -0.21850000000000003
+   },
+   {
+    "mueble": "sofa_2",
+    "clase": "sofá",
+    "piezas": 1,
+    "volumen_m3": 0.08168058881535593,
+    "cobertura": 1.0,
+    "invasion": 0.5325,
+    "invasion_sobre_observado": -0.20450000000000002
+   },
+   {
+    "mueble": "sofa_3",
+    "clase": "sofá",
+    "piezas": 1,
+    "volumen_m3": 0.02602094119799558,
+    "cobertura": 1.0,
+    "invasion": 0.5475,
+    "invasion_sobre_observado": 0.08283333333333331
+   },
+   {
+    "mueble": "mueble_9",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.03494942497222178,
+    "cobertura": 1.0,
+    "invasion": 0.5525,
+    "invasion_sobre_observado": 0.07616666666666666
+   },
+   {
+    "mueble": "mueble_10",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.01445536369642961,
+    "cobertura": 1.0,
+    "invasion": 1.0,
+    "invasion_sobre_observado": 0.0
+   },
+   {
+    "mueble": "silla_4",
+    "clase": "silla",
+    "piezas": 25,
+    "volumen_m3": 1.652071181781855,
+    "cobertura": 1.0,
+    "invasion": 0.3747,
+    "invasion_sobre_observado": 0.11703333333333332
+   },
+   {
+    "mueble": "mueble_11",
+    "clase": "mueble",
+    "piezas": 1,
+    "volumen_m3": 0.8690474381189628,
+    "cobertura": 1.0,
+    "invasion": 0.1575,
+    "invasion_sobre_observado": 0.14483333333333334
+   }
+  ],
+  "resumen": {
+   "cobertura_mediana": 1.0,
+   "invasion_sobre_observado_mediana": 0.06525,
+   "volumen_total_m3": 5.574245002296353
+  }
+ }
+]

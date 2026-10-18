@@ -7,6 +7,7 @@ Este repositorio investiga cómo sacarle un mapa utilizable a un video grabado c
 - Instalación en un equipo nuevo: [docs/SETUP.md](docs/SETUP.md).
 - Registro completo de experimentos, mediciones y decisiones: [Bitácora técnica](#bitácora-técnica-de-la-investigación), más abajo en este mismo archivo.
 - La matemática de todo el proyecto (el modelo, la reconstrucción, los filtros y las métricas, y para qué se usa cada uno): [docs/MATEMATICA.md](docs/MATEMATICA.md).
+- Recapitulación de los errores señalados y guía de auditoría para el tutor de tesis (qué se afirma, con qué evidencia y qué falta): [docs/RECAPITULACION_Y_GUIA_DE_AUDITORIA.md](docs/RECAPITULACION_Y_GUIA_DE_AUDITORIA.md).
 
 ## Lo que hay que saber antes de usarlo
 
@@ -281,6 +282,8 @@ Ver la sección "Amortiguador visual más fuerte" al final de la bitácora.
 **Continuación (más reciente): piso1 con la arquitectura completa fuera de línea.** Es la etapa 1 del proceso por capas de Pruebas_Macondo: Stella, HYBRID, analizador y *static hold* sobre todo el video. Stella aportó la pose en 3 de 422 frames. Ver la sección del 2026-10-17 (noche) al final de la bitácora.
 
 **Continuación (más reciente): la ruta deformada por el analizador de contexto, e ICP robusto en el grafo de poses.** En videos rápidos, la etapa 1 usa cadencia uniforme; el grafo mide con ICP punto a plano robusto (Tukey) y puede corregir a 4 grados de libertad. Ver la sección del 2026-10-17 (noche) sobre la ruta deformada, al final de la bitácora.
+
+**Continuación (más reciente): comparativa del proceso por capas, grafos entre etapas y recapitulación para la auditoría.** La ruta con cadencia uniforme ya no inventa un lazo. El ICP robusto da más mediciones al grafo, pero ninguna corrección pasa. Los objetos por cortes espectrales con un GenPC pequeño no mejoran a los modelos de catálogo. Ver la sección del 2026-10-17 (cierre) al final de la bitácora y [docs/RECAPITULACION_Y_GUIA_DE_AUDITORIA.md](docs/RECAPITULACION_Y_GUIA_DE_AUDITORIA.md).
 
 **Pendiente de decisión del usuario:** implementar el driver de captura de webcam en vivo (análisis ya hecho, nada implementado todavía), decidir si mitigar el techo de VRAM de la GPU antes de ese experimento (dado que a ~4 FPS el mismo OOM se alcanzaría en ~9 segundos de captura continua), continuar la campaña secuencial en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o recién ahí empezar la integración/optimización con Paragraphica.
 
@@ -3592,6 +3595,45 @@ Las 12 pruebas de `test/test_o3d_estable.py` pasan con el núcleo robusto por de
 - grafos y laplacianos por etapa para verificar la convergencia;
 - objetos por cortes espectrales, completados con un GenPC pequeño en lugar de la recuperación de modelos 3D;
 - la comparativa entre las dos variantes.
+
+## Cierre del proceso por capas en piso1: comparativa, grafos entre etapas y GenPC sobre cortes espectrales (2026-10-17, cierre)
+
+**Pedido del usuario:**
+- comparar los resultados con el ICP robusto, manteniendo la segmentación por etapas;
+- compilar grafos entre etapa y etapa con sus laplacianos, para verificar la convergencia;
+- formar clusters por propiedades del grafo y mandarlos a un difusor pequeño basado en GenPC, en lugar de la recuperación de modelos 3D;
+- dejar las figuras en una carpeta;
+- un documento con la recapitulación de errores y una guía de auditoría para el tutor de tesis.
+
+Todo está en [docs/RECAPITULACION_Y_GUIA_DE_AUDITORIA.md](docs/RECAPITULACION_Y_GUIA_DE_AUDITORIA.md) (§2.7), con las figuras y los datos en `docs/auditoria/`. El código del gemelo está en Pruebas_Macondo, sin commit.
+
+**Ruta.** Sesión vieja (analizador + sintéticos) contra la nueva (cadencia uniforme), con la distancia mediana de la vuelta a la ida relativa a la distancia del giro:
+- **vieja:** 0.189, un lazo que no existe;
+- **nueva:** 0.017.
+
+Contar los saltos de más de 5 veces el paso mediano no las distingue (14 contra 19).
+
+**ICP sin núcleo contra Tukey**, misma sesión y grafo a 4 GDL:
+
+| | Sin núcleo | Tukey |
+|---|---|---|
+| Odometrías aceptadas | 80 | 101 |
+| Cierres aceptados | 9 | 14 |
+| Corrección propuesta | 2.4° | 11.6° |
+
+Los cierres visuales estiman una deriva de 32°, y las dos variantes se rechazan por la misma odometría.
+
+**Grafos entre etapas** (celdas de 10 cm y laplaciano normalizado):
+- **etapas 1 a 4:** convergen, con una distancia espectral de 0.007–0.010;
+- **paso al gemelo:** se aparta (0.128 en A y 0.157 en B), porque reemplaza la nube por cajas.
+
+**Cortes espectrales + GenPC pequeño (B) contra modelos de catálogo (A):**
+- **Objetos:** 72 contra 44.
+- **GenPC:** aceptó 6 de 36 muebles. De los rechazados, 22 lo fueron porque su propia observación contradice a las otras vistas, otra señal de que la profundidad es inconsistente entre frames.
+- **Métricas de escena:** las mismas.
+- **Invasión del espacio libre:** algo mayor en B (+6.5 % contra +4.8 %).
+
+Se mantiene A.
 
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.
