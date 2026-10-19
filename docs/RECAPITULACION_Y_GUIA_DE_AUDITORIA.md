@@ -275,7 +275,7 @@ Son el tramo metodológicamente más sólido del proyecto (§2.2, H1).
 1. este documento entero;
 2. el resumen del [README](../README.md) (hasta "Bitácora técnica");
 3. [MATEMATICA.md](MATEMATICA.md), la matemática de cada etapa;
-4. `Pruebas_Macondo/docs/proceso_por_capas.md`, el gemelo por capas.
+4. `Pruebas_Macondo/PROCESO_POR_CAPAS.md`, el gemelo por capas.
 
 ## 2.1 Repositorios, ramas y estado de git
 
@@ -300,6 +300,8 @@ Hasta ese commit, lo posterior al 14/10 estaba solo en la copia local. Las figur
 
 ## 2.2 Qué se afirma: hipótesis y estado
 
+**Aviso (18/10):** una auditoría del código contra las fuentes de las herramientas encontró que varias mediciones de esta tabla no miden lo que dicen. H6, H8, H9, H10 y H11, y la convergencia entre etapas de §2.6–2.7, quedan en revisión hasta repetir las pruebas: ver §2.2.1. Las cifras de abajo no se reescriben.
+
 | # | Hipótesis | Estado | Evidencia principal | Fuerza |
 |---|---|---|---|---|
 | H1 | La memoria de LingBot-Map se satura en secuencias largas, por la ventana deslizante de la caché KV | **Confirmada** (CPU) | 21 + 3 corridas con procesos nuevos. ΔRAM/frame de 329.5 a 66.8 MB al pasar de 10 a 200 frames, y ~0 marginal entre 100 y 320 | Alta: repeticiones y variabilidad < 1.2 % |
@@ -313,6 +315,22 @@ Hasta ese commit, lo posterior al 14/10 estaba solo en la copia local. Las figur
 | H9 | El error entre visitas viene de la profundidad, no de la pose | **Apoyada** | Diagnóstico con píxeles apartados para validar: solo 64 de 229 frames admiten una pose plausible. Corregir la profundidad por frame fuera del piso reduce la inconsistencia 25–50 % | Media: 2 reconstrucciones del mismo video |
 | H10 | El gemelo en MuJoCo sirve para entrenar y evaluar humanoides | **No demostrada** | El X2 no colisiona con el mapa, la escala no está calibrada y no hay referencia medida | — |
 | H11 | Objetos por cortes espectrales + GenPC pequeño pueden reemplazar la recuperación de modelos | **No demostrada** | Mismas métricas de escena que A, algo más de invasión del espacio libre (+6.5 % frente a +4.8 %), 6 de 36 aceptados | Baja: 1 escena |
+
+### 2.2.1 Auditoría del 18/10: qué mediciones no valían y qué se cambió en el código
+
+Las correcciones están en el código y **no se han vuelto a correr**. Hasta repetir piso1, fablab y desnivel, estas afirmaciones no deben citarse:
+
+| Afirmación | Por qué no vale | Cambio en el código |
+|---|---|---|
+| H8: el grafo "rechaza porque deformaría la odometría" | La guarda era absoluta. Con `--dof4` los priors fijan la inclinación y una odometría ICP con más de 1.5° de inclinación no se cumple nunca: las poses que se conservan tenían el mismo residuo (2.109°). El grafo es SE(3) y no ve la escala; la escala que se reportaba (0.99–1.00) salía de correspondencias truncadas a 1.5 vóxeles. El multivía emparejaba por posición aristas que Open3D ya había podado | Guarda relativa a conservar las poses; con `--dof4` las mediciones se proyectan a los mismos grados de libertad; escala entre visitas por pares de correspondencias visuales (`escala_entre_visitas`); emparejamiento por (origen, destino) en el multivía (`src/mapas/grafo_poses.py`) |
+| H9: "el error entre visitas es de profundidad, no de pose" | El rechazo del grafo es esperable bajo deriva de escala y no es evidencia sobre la profundidad. El diagnóstico de profundidad (§1.4) sigue en pie, pero no lo confirma el grafo | — (se reformula al repetir) |
+| Convergencia de las etapas 1–4 (distancia espectral 0.007–0.010) | Los autovalores menores del laplaciano de una grilla dependen del tamaño y la forma de la región ocupada, no del contenido: un pasillo hueco sintético da 0.012. La serie no decrece y el Jaccard es 0.42–0.56. El salto a la etapa 5 venía de muestrear las cajas como sólidas | Se reporta Jaccard y distancia de Chamfer; las cajas se muestrean en su superficie (Macondo `vision/grafos_etapas.py`) |
+| H10 y "X2: 19.1 m, 0 caídas" | Una línea anulaba la colisión del mapa. El avance se contaba con un índice que salta 0.7 m cada 12 s aunque el robot esté bloqueado, y el tramo no tenía tope de tiempo | El X2 choca con el gemelo; avance por posición; tope de tiempo por tramo; se guarda `escena.xml` (Macondo `vision/x2_recorrido.py`, `gemelo_lingbot.py`). Se esperan caídas en los dos niveles de piso de piso1 (22 cm): son defectos del mapa |
+| "Pared a menos de 10 cm: 40 %" | Medía las paredes crudas del filtro, no los muros del gemelo | Se mide contra los muros de colisión del gemelo compilado (`evaluar_mapeo.py`, campo `paredes_de`) |
+| "Recorrido obstruido 0 %" | Tautológico: las puertas se abren donde la ruta cruza una pared | Sin cambio: no usarlo como evidencia |
+| Escala métrica (§1.4) | La profundidad de Depth Anything V2 Metric-Indoor escala con la focal; se entrenó con unos 598 px a 518 de lado y LingBot predice 520–866 px en un mismo video: sesgo del orden del 10 % | Corrección por la focal de cada frame (Macondo `vision/lingbot.py`, `metric_scale`) |
+| H6 en piso1 (Stella) | Stella recibía el 59 % de los frames publicados y 70 % de los que recibía quedaron inicializando: con este video H6 es **no evaluable**, no refutada. La pérdida se atribuyó a su cola de profundidad 1, pero medido el 2026-10-18 es del transporte de Fast DDS: una imagen de 1,5 MB en BEST_EFFORT no cabe en el segmento de memoria compartida por defecto (512 KB) y llegaban 11 de 50 a otro proceso, aun a 2 Hz y sin carga | Segmento de 32 MB en el puente (`src/ros/fastdds_imagenes.xml`, cargado por `ros2_bridge.py`): llegan 430 de 450. Se descartó publicar 1 de cada 3 (`--ros2_pub_every 3`): a 10 frames/s Stella pierde el seguimiento (17 poses frente a 94 en los primeros 150 frames) |
+| H11 ("GenPC pequeño") | No es GenPC: SDXL + T2I-Adapter + InstantMesh en lugar de TRELLIS.2 + Qwen-Image-Edit, y el repositorio oficial no publica el refinamiento SDS. "6 de 36" no dice nada sobre GenPC | — (se renombra al repetir) |
 
 ## 2.3 Arquitectura: qué hace cada etapa y dónde está
 

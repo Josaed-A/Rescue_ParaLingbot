@@ -62,16 +62,35 @@ def prior_information(scale, up=None, stiff=None):
     return info
 
 
+def project_4dof(T, up, c):
+    """T restringida a los grados de libertad que dof4 deja libres, alrededor del centro c de la nube: giro solo
+    sobre `up` (la componente de giro alrededor de la vertical) y desplazamiento horizontal de c."""
+    u = up / np.linalg.norm(up)
+    q = Rotation.from_matrix(np.array(T[:3, :3])).as_quat()     # copia: las aristas de Open3D son de solo lectura
+    tw = np.r_[(q[:3] @ u) * u, q[3]]
+    n = np.linalg.norm(tw)
+    Rp = Rotation.from_quat(tw / n).as_matrix() if n > 1e-9 else np.eye(3)
+    d = T[:3, :3] @ c + T[:3, 3] - c
+    out = np.eye(4)
+    out[:3, :3] = Rp
+    out[:3, 3] = c + d - (d @ u) * u - Rp @ c
+    return out
+
+
 def pcd(P):
     return o3d.geometry.PointCloud(o3d.utility.Vector3dVector(np.asarray(P, np.float64)))
 
 
-def umeyama_scale(A, B):
-    a, b = A - A.mean(0), B - B.mean(0)
-    U, S, Vt = np.linalg.svd(b.T @ a / len(A))
-    D = np.eye(3)
-    D[2, 2] = np.sign(np.linalg.det(U @ Vt))
-    return float(np.trace(np.diag(S) @ D) / ((a ** 2).sum() / len(A)))
+def pairwise_scale(A, B, n=4000, seed=0):
+    """Escala de B respecto de A: mediana del cociente de distancias entre pares de correspondencias (los pares más
+    largos). No depende de la pose ni de un radio de correspondencia: con las correspondencias del ICP, truncadas a
+    1.5 vóxeles, la escala medida no podía apartarse de 1."""
+    if len(A) < 10:
+        return None
+    i, j = np.random.default_rng(seed).integers(0, len(A), (2, n))
+    da, db = np.linalg.norm(A[i] - A[j], axis=1), np.linalg.norm(B[i] - B[j], axis=1)
+    ok = da > np.median(da)
+    return float(np.median(db[ok] / da[ok])) if ok.sum() >= 50 else None
 
 
 # --- identidad --------------------------------------------------------------------------------------------
@@ -243,8 +262,6 @@ def measure(src, tgt, voxel, dists, eval_mult, T0=None, tukey_rel=0.0):
            "desplazamiento": float(np.linalg.norm(T[:3, :3] @ c + T[:3, 3] - c)), "giro_deg": rot_deg(T[:3, :3]),
            "escala": None, "dispersion_normales": 0.0}
     if len(corr) >= 50:
-        A = pts[corr[:, 0]] @ T[:3, :3].T + T[:3, 3]
-        out["escala"] = umeyama_scale(A, np.asarray(tgt.points)[corr[:, 1]])
         out["dispersion_normales"] = normal_spread(np.asarray(tgt.normals)[corr[:, 1]])
         out["informacion"] = reg.get_information_matrix_from_point_clouds(src, tgt, d_eval, T)
     return out
@@ -371,7 +388,7 @@ class PoseGraph:
                                        "solape_inicial": ov, "incierta": True, "T": None, "informacion": None})
                     continue
                 visual_ok += 1
-                T0, n3d = None, 0
+                T0, n3d, esc = None, 0, None
                 if lift_px is not None:
                     A, okA, za = lift_px(ka, pa)
                     B, okB, zb = lift_px(kb, pb)
@@ -379,10 +396,11 @@ class PoseGraph:
                     # Umbral proporcional a la profundidad de las correspondencias (LingBot: ±2.5 % entre vistas).
                     thr = max(3 * self.voxel, 0.04 * float(np.median(np.r_[za[ok], zb[ok]]))) if ok.any() else 0
                     T0, n3d = ransac_rigid(A[ok], B[ok], thr, seed=p.seed)
+                    esc = pairwise_scale(A[ok], B[ok], seed=p.seed)
                 m = measure(self.nodes[s]["_pcd"], self.nodes[t]["_pcd"], self.voxel,
                             p.loop_icp_mult if T0 is None else p.icp_dist_mult, p.eval_dist_mult, T0,
                             tukey_rel=getattr(p, "icp_tukey_rel", 0.0))
-                m["inliers_3d"] = n3d
+                m["inliers_3d"], m["escala"] = n3d, esc
                 if T0 is not None:
                     c = np.asarray(self.nodes[s]["_pcd"].points).mean(0)
                     m["dif_con_visual"] = float(np.linalg.norm((m["T"][:3, :3] - T0[:3, :3]) @ c + m["T"][:3, 3] - T0[:3, 3]))
@@ -397,6 +415,12 @@ class PoseGraph:
                 e["keyframes"] = [int(ka), int(kb)]
         self.stats["candidatos_cierre"] = tested
         self.stats["cierres_con_verificacion_visual"] = visual_ok
+        # El grafo es SE(3): una escala distinta entre visitas no se puede corregir y deja residuos que lo hacen rechazar.
+        sc = [e["escala"] for e in self.edges if e["tipo"] == "cierre" and e.get("escala")]
+        if sc:
+            self.stats["escala_entre_visitas"] = {"n": len(sc), "mediana": round(float(np.median(sc)), 4),
+                                                  "p10": round(float(np.percentile(sc, 10)), 4),
+                                                  "p90": round(float(np.percentile(sc, 90)), 4)}
         dv = [e["deriva_visual"] for e in self.edges if e.get("deriva_visual") and e["deriva_visual"]["inliers_3d"] >= 15]
         if dv:
             worst = max(dv, key=lambda x: x["giro_deg"] + x["desplazamiento"] / max(self.med, 1e-9))
@@ -494,6 +518,12 @@ class PoseGraph:
             self.decision = "restricciones consistentes con las poses actuales: se conservan"
             return identity
         G = identity
+        up = getattr(self, "up", None)
+        if up is not None:          # dof4: las mediciones, en los mismos grados de libertad que dejan libres los priors
+            for e in self.edges:
+                if e["estado"] == "aceptada" and e.get("T") is not None:
+                    e["T_medida"] = e["T"]
+                    e["T"] = project_4dof(e["T"], up, np.asarray(self.nodes[e["s"]]["_pcd"].points).mean(0))
         self.add_lingbot_priors()
         for it in range(3):                                  # optimizar, podar cierres sin respaldo, repetir
             acc = [e for e in self.edges if e["estado"] == "aceptada"]
@@ -518,6 +548,7 @@ class PoseGraph:
                 break
         moves = []
         for k, n in enumerate(self.nodes):
+            n["pose_propuesta"] = G[k]                   # la solución, se acepte o no: para graficar cada corrección
             c = np.asarray(n["_pcd"].points).mean(0) if len(n["_pcd"].points) else np.zeros(3)
             moves.append((float(np.linalg.norm(G[k][:3, :3] @ c + G[k][:3, 3] - c)), rot_deg(G[k][:3, :3])))
         self.stats["correccion_max"] = max(x for x, _ in moves)
@@ -525,11 +556,18 @@ class PoseGraph:
         self.stats["despues"] = self.consistency(G)
         b, a = self.stats["antes"], self.stats["despues"]
         # La corrección absoluta puede ser grande (deriva acumulada), pero no debe deformar la geometría local:
-        # las aristas de odometría (vecinos que LingBot ve consistentes) tienen que seguir cumpliéndose.
-        odo = [self.residual(e, G) for e in self.edges if e["tipo"] == "odometria" and e["estado"] == "aceptada"]
+        # las aristas de odometría (vecinos que LingBot ve consistentes) no pueden cumplirse peor que con las poses
+        # originales. La guarda es relativa a conservarlas: una odometría que ya no se cumple sin corregir (con dof4,
+        # un ICP con más inclinación que la que permiten los priors) no es motivo para rechazar la corrección.
+        odo_e = [e for e in self.edges if e["tipo"] == "odometria" and e["estado"] == "aceptada"]
+        odo = [self.residual(e, G) for e in odo_e]
+        odo0 = [self.residual(e, identity) for e in odo_e]
         self.stats["odometria_residuo_max"] = max((r for r, _ in odo), default=0.0)
         self.stats["odometria_giro_residuo_max_deg"] = max((rr for _, rr in odo), default=0.0)
-        deformed = [r for r, rr in odo if r > p.odo_residual_vox * self.voxel or rr > p.odo_residual_deg]
+        self.stats["odometria_residuo_max_sin_corregir"] = max((r for r, _ in odo0), default=0.0)
+        self.stats["odometria_giro_residuo_max_sin_corregir_deg"] = max((rr for _, rr in odo0), default=0.0)
+        deformed = [1 for (r, rr), (r0, rr0) in zip(odo, odo0)
+                    if r - r0 > p.odo_residual_vox * self.voxel or rr - rr0 > p.odo_residual_deg]
         over = [self.nodes[k]["id"] for k, (x, y) in enumerate(moves)
                 if x > max(p.max_trans_rel * self.med, p.drift_rate * self.nodes[k]["recorrido"])
                 or y > p.max_loop_rot_deg]
@@ -537,8 +575,9 @@ class PoseGraph:
                   (a["rmse_mediana"] < b["rmse_mediana"] * 0.98 or a["fitness_mediana"] > b["fitness_mediana"] + 0.02))
         if deformed:
             self.decision = (f"corrección rechazada: deformaría la geometría local ({len(deformed)} aristas de "
-                             "odometría dejarían de cumplirse); posible error de escala o de forma de la "
-                             "profundidad, que una transformación rígida no debe tapar")
+                             "odometría se cumplirían peor que sin corregir); el grafo es SE(3): un error de escala "
+                             "entre visitas (ver escala_entre_visitas) o de forma de la profundidad no se puede "
+                             "corregir con transformaciones rígidas")
             return identity
         if over:
             self.decision = (f"corrección rechazada: {len(over)} fragmentos se moverían más que la deriva plausible "
@@ -653,10 +692,13 @@ class PoseGraph:
             reg_.global_optimization(pg, reg_.GlobalOptimizationLevenbergMarquardt(),
                                      reg_.GlobalOptimizationConvergenceCriteria(), option)
         G = [np.asarray(nd.pose).copy() for nd in pg.nodes]
-        for k, pe in zip(in_graph, pg.edges):
+        # Open3D devuelve el grafo sin las aristas podadas: se emparejan por (origen, destino, incierta), no por posición.
+        kept = {(pe.source_node_id, pe.target_node_id, pe.uncertain): float(pe.confidence) for pe in pg.edges}
+        for k in in_graph:
             e = self.edges[k]
-            e["confianza"] = float(pe.confidence)
-            if e["incierta"] and pe.confidence < prune:
+            conf = kept.get((e["s"], e["t"], e["incierta"]))
+            e["confianza"] = conf
+            if e["incierta"] and (conf is None or conf < prune):
                 e["estado"] = "podada"
         # Cuánto se aparta la solución de LingBot entre fragmentos vecinos (comparten frames: LingBot los registra
         # bien entre sí). Un ICP que resbala en piso o escaleras encadena giros: el tutorial no lo detecta.
@@ -695,11 +737,12 @@ class PoseGraph:
         nodes = [{"id": n["id"], "sesion": self.session, "frames": n["frames"], "frame_ids": n["frame_ids"],
                   "intervalo": [n["frame_ids"][0], n["frame_ids"][-1]], "keyframes": n["keyframes"],
                   "pose_inicial": mat(n["pose_inicial"]), "pose_optimizada": mat(n["pose_optimizada"]),
+                  "pose_propuesta": mat(n.get("pose_propuesta")),
                   "marco": "mundo de LingBot-Map (c2w = inv(extrinsic)); la pose del nodo corrige su nube",
                   "unidades": "unidades del modelo (sin escala métrica)",
                   "nube": "frames del .npz de la sesión (no se copia)", "estado": n["estado"],
                   "incertidumbre": None} for n in self.nodes]
-        edges = [{k: (mat(v) if k in ("T", "informacion") else (round(v, 6) if isinstance(v, float) else v))
+        edges = [{k: (mat(v) if k in ("T", "T_medida", "informacion") else (round(v, 6) if isinstance(v, float) else v))
                   for k, v in e.items()} for e in self.edges]
         for e in edges:
             e["origen"], e["destino"] = self.nodes[e.pop("s")]["id"], self.nodes[e.pop("t")]["id"]

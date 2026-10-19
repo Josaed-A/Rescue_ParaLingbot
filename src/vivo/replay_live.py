@@ -58,6 +58,9 @@ def main():
     ap.add_argument("--stella_cpus", default=None, help="fijar Stella a estas CPUs, p. ej. 4-11")
     ap.add_argument("--tracking_mode", default="basic", choices=["basic", "stella", "hybrid"],
                     help="qué pose se anuncia como referencia (etapa 6)")
+    ap.add_argument("--hybrid_min_rate_hz", type=float, default=10.0,
+                    help="HYBRID: ritmo mínimo de poses de Stella (por segundo de video) para usarla; debe quedar "
+                         "por debajo del ritmo publicado (con --ros2_pub_every 3 en un video de 30 fps, 10/s)")
     ap.add_argument("--stella_scale", default="anchor", choices=["anchor", "window"],
                     help="escala del modo STELLA: fija al anclar cada mapa o re-estimada por ventana (etapa 9)")
     ap.add_argument("--no_static_hold", dest="static_hold", action="store_false",
@@ -83,7 +86,7 @@ def main():
            "source_fps": a.source_fps, "rotation": a.rotation, "source_realtime": a.realtime,
            "ros2": a.ros2, "stella_config": a.stella_config, "ros2_camera_info": a.stella_config,
            "ros2_resize": a.ros2_resize, "ros2_pub_every": a.ros2_pub_every, "stella_log_dir": a.captures_dir,
-           "stella_cpus": a.stella_cpus, "tracking_mode": a.tracking_mode,
+           "stella_cpus": a.stella_cpus, "tracking_mode": a.tracking_mode, "hybrid_min_rate_hz": a.hybrid_min_rate_hz,
            "register_with_reference": a.register_with_reference, "stella_scale": a.stella_scale,
            "static_hold": a.static_hold, "static_frac": a.static_frac,
            "debug_stall_at_frame": a.debug_stall_at_frame,

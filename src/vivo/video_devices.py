@@ -164,6 +164,8 @@ def _hint(cfg):
         return "prueba4"
     if "unisabana" in p:
         return "unisabana"
+    if "piso1" in p:            # la misma prueba fuera de captures/ (p. ej. ~/Downloads) caía en intrínsecos estimados
+        return "piso1"
     return ""
 
 

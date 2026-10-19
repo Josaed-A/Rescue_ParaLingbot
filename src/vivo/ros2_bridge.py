@@ -284,6 +284,9 @@ class Ros2Bridge:
 
     # -- ciclo de vida ------------------------------------------------------
     def start(self):
+        # antes del primer participante DDS del proceso; Stella (subproceso) lo hereda
+        os.environ.setdefault("FASTRTPS_DEFAULT_PROFILES_FILE", os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ros", "fastdds_imagenes.xml"))
         try:
             import rclpy
             from rclpy.executors import SingleThreadedExecutor

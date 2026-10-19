@@ -285,6 +285,10 @@ Ver la sección "Amortiguador visual más fuerte" al final de la bitácora.
 
 **Continuación (más reciente): comparativa del proceso por capas, grafos entre etapas y recapitulación para la auditoría.** La ruta con cadencia uniforme ya no inventa un lazo. El ICP robusto da más mediciones al grafo, pero ninguna corrección pasa. Los objetos por cortes espectrales con un GenPC pequeño no mejoran a los modelos de catálogo. Ver la sección del 2026-10-17 (cierre) al final de la bitácora y [docs/RECAPITULACION_Y_GUIA_DE_AUDITORIA.md](docs/RECAPITULACION_Y_GUIA_DE_AUDITORIA.md).
 
+**Continuación (más reciente): Stella casi no recibía imágenes, y la primera corrida con las correcciones de la auditoría.** El transporte de Fast DDS por defecto perdía casi todas las imágenes de 1.5 MB que el puente publica para Stella; un segmento de memoria compartida de 32 MB lo arregla. Publicar 1 de cada 3 frames, una corrección de la auditoría, se revirtió: Stella pierde el seguimiento a 10 frames/s. En piso1, Stella pasa de 226 a 479 poses, pero la malla es menos coherente y el X2 queda bloqueado en el gemelo. Ver la sección del 2026-10-18 al final de la bitácora.
+
+**Continuación (más reciente): la ruta por herramienta.** El grafo de poses guarda su solución aunque la rechace. En piso1, la ruta usada (HYBRID con Stella) termina a 1.6 m de la de LingBot sola; la propuesta del grafo, a 0.1 m, pero la guarda de deriva la rechaza. Ver la sección del 2026-10-18 (tarde) al final de la bitácora.
+
 **Pendiente de decisión del usuario:** implementar el driver de captura de webcam en vivo (análisis ya hecho, nada implementado todavía), decidir si mitigar el techo de VRAM de la GPU antes de ese experimento (dado que a ~4 FPS el mismo OOM se alcanzaría en ~9 segundos de captura continua), continuar la campaña secuencial en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o recién ahí empezar la integración/optimización con Paragraphica.
 
 ## Estado del diagnóstico (ya hecho, no repetir)
@@ -3634,6 +3638,95 @@ Los cierres visuales estiman una deriva de 32°, y las dos variantes se rechazan
 - **Invasión del espacio libre:** algo mayor en B (+6.5 % contra +4.8 %).
 
 Se mantiene A.
+
+## Stella sin imágenes por el transporte de Fast DDS, y piso1 con las correcciones de la auditoría (2026-10-18)
+
+**Pedido del usuario:** después del reinicio, correr las pruebas de Open3D y una corrida nueva de piso1 con las correcciones de la auditoría del 2026-10-18, y comparar visualmente contra la del 2026-10-17 (videos, grafos y laplacianos). Sin commits.
+
+**Pruebas.** Las 14 de `test/test_o3d_estable.py` pasan. Durante la corrida apareció un fallo que no cubrían: `project_4dof` recibe aristas de Open3D, que son matrices de solo lectura, y SciPy 1.14 no las acepta (`buffer source array is read-only`). Se corrigió copiando la rotación, y la prueba ahora usa una matriz de solo lectura.
+
+**Stella recibía pocas imágenes.** En la primera corrida, Stella dio 1 pose en todo el video. Se buscó la causa por partes:
+
+| Prueba (imágenes de 540x960, unos 1.5 MB, `BEST_EFFORT`) | Llegan |
+|---|---|
+| Publicador y suscriptor en el mismo proceso, a 2 Hz | 50 de 50 |
+| En procesos distintos, a 2 Hz y sin carga | **11 de 50** |
+| Solo memoria compartida / `LARGE_DATA` / solo loopback / solo UDP | 1 / 12 / 2 / 5 de 50 |
+| Perfil con segmento de memoria compartida de 32 MB | **50 de 50** (basta en el publicador) |
+| Camino real, con el modelo y Stella, 150 frames del modelo | 150 de 150 (1 de cada 3) y 430 de 450 (todos) |
+
+El segmento de memoria compartida por defecto de Fast DDS es de 512 KB, y una imagen no cabe. Arreglo: `src/ros/fastdds_imagenes.xml`, que `ros2_bridge.py` pone en `FASTRTPS_DEFAULT_PROFILES_FILE` antes de crear el participante, si nadie lo definió antes; Stella lo hereda. Antes del reinicio la corrida del 17/10 recibía el 59 %, y la causa de esa diferencia no se averiguó. La auditoría atribuía al tamaño de la cola de Stella el "41 % perdido"; con el transporte arreglado, esa explicación no se sostiene.
+
+**Publicar 1 de cada 3 frames se revirtió.** Con el transporte arreglado y los primeros 150 frames del modelo:
+- **1 de cada 3** (Stella a 10 frames/s): 17 poses, un solo mapa, perdida en el frame 24 sin recuperarse;
+- **todos** (30 frames/s): 94 poses en 3 mapas.
+
+`run_gemelo_capas.sh` de Pruebas_Macondo vuelve a publicar todos los frames y al umbral de HYBRID de 10 poses/s.
+
+**Configuración de cámara de Stella.** Con el video en `~/Downloads`, `stella_config_for` no reconocía la prueba y generaba intrínsecos estimados (focal 385.6 en vez de 754). La corrida del 17/10 había recibido la configuración a mano. `_hint` de `video_devices.py` ahora reconoce "piso1".
+
+**Incidentes.**
+- Una corrida se quedó sin VRAM: al detener `build_maps.py` siguió vivo su hijo `geo_filter.py`, con 2.4 GB de la GPU. Al cortar una corrida hay que matar también los hijos.
+- Una verificación se colgó 10 minutos antes del primer frame (GPU al 0 %, el hilo principal ocupado) y no se repitió en tres corridas siguientes. La causa no se encontró.
+
+**piso1, 17/10 contra 18/10.** La comparación está en `Pruebas_Macondo/mapas/comparacion_auditoria_piso1/` (`comparar.py`, `resumen.md`, videos y grafos lado a lado). La corrida vieja se re-evaluó con el código corregido. Cambian varias cosas a la vez (transporte de Stella, correcciones de la auditoría, escala por la focal), así que no es una ablación.
+
+| | 17/10 | 18/10 |
+|---|---|---|
+| Poses de Stella / frames con HYBRID usando Stella | 226 / 43 | **479 / 107** |
+| Grafo de poses: cierres aceptados | 14 | 42 |
+| Grafo de poses: motivo del rechazo | 1 odometría | 2 fragmentos más allá de la deriva plausible (8 %) |
+| Escala (m por unidad) | 1.281 | 1.561 |
+| `inlier5` medio de la malla | 0.44 | **0.32** |
+| Distancia en planta entre el inicio y el final | 0.22 m | **1.73 m** |
+| Paredes de DINOv2 a menos de 10 cm del muro del gemelo | 52 % | 36 % |
+| Recorrido obstruido en el gemelo | 0 % | 6.4 % (una mesa con modelo 3D) |
+| X2 | 19.1 m caminables, sin colisión | **0.4 de 23.6 m**, bloqueado al principio |
+| Jaccard / Chamfer de la etapa 4 a la 5 | 0.37 / 0.072 m | 0.31 / 0.087 m |
+
+**Lectura.**
+1. Stella aporta más del doble de poses. La malla es menos coherente, y la ruta, que va y vuelve, cierra peor. Ya se había medido que registrar con la pose de Stella baja la coherencia multivista (etapas 10 y 11, 2026-10-05), así que es la explicación más probable, pero no se separó del resto de los cambios.
+2. La guarda nueva del grafo rechaza por un motivo que sí dice algo (deriva implausible) y no por la guarda tautológica.
+3. Con colisión, el X2 queda frente a una caja de pared o puerta en el pasillo angosto del frame 39. Es un defecto del mapa, que es lo que se quería medir. Los 19.1 m del 17/10 eran de un robot que atravesaba el gemelo.
+
+**Archivos:** `src/ros/fastdds_imagenes.xml` (nuevo), `src/vivo/ros2_bridge.py`, `src/vivo/video_devices.py`, `src/mapas/grafo_poses.py` y `test/test_o3d_estable.py`.
+
+**Limitaciones:**
+- Una corrida por configuración.
+- La prueba de 1 de cada 3 frames contra todos usa solo los primeros 150 frames del modelo.
+- No se sabe por qué el 17/10 llegaba el 59 % de las imágenes.
+- Sin referencia externa de la ruta de piso1.
+
+## La ruta de piso1 por herramienta: Stella corre el rumbo y la guarda del grafo rechaza la corrección (2026-10-18, tarde)
+
+**Pedido del usuario:** graficar cómo se desvía la ruta con cada herramienta y cada corrección, antes de DINOv2 y del modelo. Las herramientas de gráficos están en Pruebas_Macondo (`vision/grafos_rutas.py`, `vision/desvio_rutas.py`, `GRAFOS_POR_ETAPAS.md`). Sin commits.
+
+**Cambio en `src/mapas/grafo_poses.py`.** Cada nodo guarda la solución del grafo en `pose_propuesta`, se acepte o no. Hasta hoy, al rechazar la corrección los nodos volvían a la identidad y la propuesta se perdía. El grafo de las tres sesiones de piso1 se recalculó aparte, en `exports/estable_rutas/`, con `--dof4` y el filtro. La de hoy repitió exactamente la decisión original, y las dos del 17/10 se rechazan ahora por otros motivos: el código cambió con la auditoría.
+
+**Rutas en piso1.** Separación de la vuelta respecto de la ida, relativa al punto más lejano: el recorrido es un pasillo de ida y vuelta, así que debería ser chica.
+
+| Ruta | 17/10 tarde (analizador) | 17/10 | 18/10 |
+|---|---|---|---|
+| LingBot sola | 0.170 | 0.027 | 0.027 |
+| HYBRID, la usada | 0.189 | 0.017 | 0.077 |
+| ICP robusto encadenado | 0.193 | 0.022 | 0.089 |
+| Propuesta del grafo de poses | 0.134 | 0.030 | 0.030 |
+
+**Desvío frente a LingBot sola, 18/10, en metros:**
+
+| Ruta | Máximo | Al final |
+|---|---|---|
+| HYBRID, la usada | 1.68 | 1.62 |
+| Propuesta del grafo de poses | 0.79 | 0.11 |
+
+**Lectura:**
+1. Con el transporte arreglado, Stella interviene en más frames. En cada tramo con pose de Stella, el rumbo de HYBRID se corre unos grados, y LingBot sigue desde ese rumbo: el error se arrastra y la ruta abre un lazo que no existe.
+2. El grafo de poses, con el ICP robusto y los cierres verificados, lo corregiría: su propuesta coincide con LingBot sola al 0.6 % del recorrido. La guarda de deriva la rechaza porque dos fragmentos del final se moverían más del 8 % de lo recorrido, unos 1.7 m.
+3. LingBot sola es determinista: da la misma ruta el 17 y el 18/10.
+
+**Limitaciones:**
+- Una sola prueba.
+- Sin referencia externa de la ruta: LingBot sola es la referencia por ser la que mejor vuelve sobre sí misma, no por ser la verdadera.
 
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.

@@ -3,7 +3,7 @@
 **Dónde está:** en Pruebas_Macondo.
 - Construcción: [`vision/mapa_mujoco.py`](https://github.com/Josaed-A/Pruebas_Macondo/blob/estado-dinov2-mujoco-paralingbot/vision/mapa_mujoco.py).
 - Evaluación: [`vision/evaluar_mapeo.py`](https://github.com/Josaed-A/Pruebas_Macondo/blob/estado-dinov2-mujoco-paralingbot/vision/evaluar_mapeo.py).
-- Estado previo y su evaluación: `docs/evaluacion_mapeo.md` de esa rama.
+- Estado previo y su evaluación: `EVALUACION_MAPEO.md` de esa rama.
 
 ## Qué colisiona y qué no
 

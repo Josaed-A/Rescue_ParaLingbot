@@ -427,3 +427,27 @@ def test_4dof_priors_let_the_loop_fix_heading_but_not_tilt():
             assert tilt < tilt_max                            # la inclinación no
         else:
             assert tilt > 1                                   # sin dof4, el cierre también inclina
+
+
+def test_4dof_projection_keeps_heading_and_horizontal_motion_only():
+    """Con dof4 las mediciones se restringen a los mismos grados de libertad que los priors (auditoría 2026-10-18)."""
+    up, c = np.array([0.0, 0.0, 1.0]), np.array([1.0, 2.0, 0.5])
+    T = np.eye(4)
+    T[:3, :3] = Rotation.from_euler("zx", [8, 6], degrees=True).as_matrix()
+    T[:3, 3] = [0.3, -0.2, 0.15]
+    T.setflags(write=False)                                                   # como las aristas de Open3D
+    P = GP.project_4dof(T, up, c)
+    assert np.allclose(P[:3, :3] @ up, up)                                    # sin inclinación
+    yaw = np.degrees(np.arctan2(P[1, 0], P[0, 0]))
+    assert abs(yaw - 8) < 0.5                                                 # el rumbo se conserva
+    d, dp = T[:3, :3] @ c + T[:3, 3] - c, P[:3, :3] @ c + P[:3, 3] - c
+    assert abs(dp[2]) < 1e-9 and np.allclose(dp[:2], d[:2])                  # el centro se mueve solo en horizontal
+
+
+def test_pairwise_scale_sees_scale_that_a_truncated_icp_cannot():
+    rng = np.random.default_rng(0)
+    A = rng.uniform(-2, 2, (300, 3))
+    R = Rotation.from_euler("z", 30, degrees=True).as_matrix()
+    B = 1.15 * A @ R.T + [0.4, 0.1, 0.0]
+    B[:30] += rng.normal(0, 0.3, (30, 3))                                    # 10 % de correspondencias malas
+    assert abs(GP.pairwise_scale(A, B) - 1.15) < 0.02
