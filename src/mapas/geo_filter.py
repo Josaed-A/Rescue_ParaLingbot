@@ -424,6 +424,9 @@ def main():
     ap.add_argument("--no_align", dest="align", action="store_false", help="(por defecto) no realinear")
     ap.add_argument("--align_sigma", type=float, default=15.0, help="suavizado temporal de la realineación (frames)")
     ap.add_argument("--no_semantics", action="store_true")
+    ap.add_argument("--poses", default=None,
+                    help="<..>_estable.npz de o3d_estable.py: usar sus poses en vez de las del .npz (cuando el grafo de "
+                         "poses las corrigió: paredes y pisos quedan en el marco de las poses que usan la malla y el gemelo)")
     ap.add_argument("--dump_points", action="store_true", help="guardar la nube de la etapa estructural (depuración)")
     a = ap.parse_args()
 
@@ -439,6 +442,11 @@ def main():
     E = np.tile(np.eye(4, dtype=np.float32), (N, 1, 1))
     E[:, :3, :4] = d["extrinsic"][real]
     c2w_np = np.linalg.inv(E)
+    if a.poses:
+        z = np.load(a.poses)
+        if not np.array_equal(z["real"], real):
+            sys.exit(f"{a.poses} no tiene los mismos frames que {a.npz}")
+        c2w_np = z["c2w"].astype(c2w_np.dtype)
     _, H, W = depth.shape
     med = float(np.median(depth[::10][depth[::10] > 0]))
     cref = float(np.percentile(conf[::5], a.ref_conf_percentile))

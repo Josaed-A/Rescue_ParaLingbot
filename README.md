@@ -289,6 +289,8 @@ Ver la sección "Amortiguador visual más fuerte" al final de la bitácora.
 
 **Continuación (más reciente): la ruta por herramienta.** El grafo de poses guarda su solución aunque la rechace. En piso1, la ruta usada (HYBRID con Stella) termina a 1.6 m de la de LingBot sola; la propuesta del grafo, a 0.1 m, pero la guarda de deriva la rechaza. Ver la sección del 2026-10-18 (tarde) al final de la bitácora.
 
+**Continuación (más reciente): experimento E1, la referencia de la etapa 1.** Con LingBot sola (BASIC sin *static hold*) la malla, el gemelo y la ruta salen mejor que con HYBRID o con *static hold*, y solo así el grafo de poses acepta su corrección. Destapó que el filtro geométrico no se recalculaba con las poses corregidas (`build_maps.refiltrar`). Ver la sección del 2026-10-19.
+
 **Pendiente de decisión del usuario:** implementar el driver de captura de webcam en vivo (análisis ya hecho, nada implementado todavía), decidir si mitigar el techo de VRAM de la GPU antes de ese experimento (dado que a ~4 FPS el mismo OOM se alcanzaría en ~9 segundos de captura continua), continuar la campaña secuencial en la máquina Windows dado el costo de tiempo mucho mayor ahí, continuar la línea de redundancia de frames, o recién ahí empezar la integración/optimización con Paragraphica.
 
 ## Estado del diagnóstico (ya hecho, no repetir)
@@ -3727,6 +3729,35 @@ El segmento de memoria compartida por defecto de Fast DDS es de 512 KB, y una im
 **Limitaciones:**
 - Una sola prueba.
 - Sin referencia externa de la ruta: LingBot sola es la referencia por ser la que mejor vuelve sobre sí misma, no por ser la verdadera.
+
+## Experimento E1: la referencia de la etapa 1, y el filtro con las poses corregidas (2026-10-19)
+
+**Pedido del usuario:** después del reinicio, correr `test_o3d_estable.py` y el experimento E1 de `EVALUACION_STELLA_Y_TECNICAS.md` (Pruebas_Macondo, sección 4): BASIC o HYBRID, con o sin *static hold*, sobre el mismo video de piso1, con las cinco etapas del proceso por capas. Sin commits.
+
+**Corridas.** `replay_live.py` con `--tracking_mode basic|hybrid` y `--no_static_hold`, lanzadas desde `run_gemelo_capas.sh` de Macondo con `ETAPA1_ARGS`. Sesiones en `captures/pruebas_reales/capas/piso1_e1_{basic,basic_hold,hybrid_sinhold,hybrid}/`.
+
+| | BASIC | BASIC + *hold* | HYBRID sin *hold* | HYBRID | HYBRID 18/10 |
+|---|---|---|---|---|---|
+| Rumbo al final frente a LingBot sola, etapa 1 | 0° | −4.3° | +6.5° | −15.8° | −13.8° |
+| Celdas con dos capas a más de 10 cm, etapa 2 | 32 % | 46 % | 51 % | 46 % | 45 % |
+| Grafo de poses | aceptado | rechazado | rechazado | rechazado | rechazado |
+| inlier5 de la malla | 0.56 | 0.43 | 0.39 | 0.34 | 0.32 |
+
+**Lectura:**
+1. LingBot dio exactamente lo mismo en las cinco corridas: las diferencias salen solo de la pose con la que se registra la geometría.
+2. El *static hold* y los pasos de Stella duplican superficies cada uno por su lado. El giro de Stella cambia de signo entre corridas.
+3. Solo con LingBot sola la etapa 2 acepta la corrección del grafo de poses. Las etapas 4 y 5 de Macondo lo confirman: piso más plano y más metros caminables para el X2.
+
+**Arreglo que destapó.** Era la primera vez que el grafo aceptaba su corrección en el proceso por capas. Las paredes y pisos del filtro geométrico seguían calculados con las poses de la etapa 1, y el gemelo de Macondo se negó a construirse: difería hasta 0.32 unidades y 5.3° de las poses estabilizadas.
+- `src/mapas/geo_filter.py --poses <estable.npz>`: el filtro usa esas poses en vez de las de la sesión. Exige los mismos frames.
+- `src/mapas/build_maps.py`, `refiltrar`: tras la tarea `estable`, si las poses cambiaron más de 1e-4, recalcula el filtro con ellas en `exports/estable/sesion_estable_filtro.npz`. No lo rehace si ya existe con esas poses.
+- Prueba: `test/test_refiltrar.py`. Con `test_o3d_estable.py`, 15 pasan (`python3 -m pytest -p no:anyio`, porque el plugin anyio de `~/.local` no carga con este pytest).
+
+**Limitaciones:**
+- Un solo video. Falta repetirlo en otro con revisitas (fablab o desnivel) antes de cambiar la referencia por defecto a LingBot sola.
+- La métrica de dos capas es propia (2-medias 1D a lo largo de la normal de celdas de 40 cm) y no tiene referencia externa.
+
+Detalle y comparativos en Pruebas_Macondo: `EVALUACION_STELLA_Y_TECNICAS.md` y `docs/traspaso_2026-10-19.md`.
 
 ## Filosofía de la investigación (orden estricto — no saltarse pasos)
 1. Revisar estado actual del repo / lo ya instalado.

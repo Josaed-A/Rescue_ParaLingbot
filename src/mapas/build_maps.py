@@ -79,6 +79,23 @@ PEAK = {"mb": 0}
 FILTER_ARGS = []        # variante del filtro elegida por la medición del 2026-10-04 (ver la bitácora)
 
 
+def refiltrar(npz, stable_npz, py):
+    """Si el grafo de poses corrigió las poses, las paredes y los pisos del filtro (calculados con las de la etapa 1)
+    quedan corridos respecto de las que usan la malla y el gemelo: se recalcula el filtro con las estabilizadas, junto
+    a la estabilización (<..>_estable_filtro.npz, <..>_estable_estructura.json)."""
+    import numpy as np
+    z = np.load(stable_npz)
+    if np.abs(z["c2w"] - z["c2w_original"]).max() < 1e-4:
+        return 0                                  # corrección rechazada: el filtro de la etapa 1 ya sirve
+    out = stable_npz[:-len(".npz")]
+    f = out + "_filtro.npz"
+    if os.path.isfile(f) and np.abs(np.load(f)["c2w_fix"] - z["c2w"]).max() < 1e-4:
+        print("ya existe", f, "(de las poses estabilizadas)")
+        return 0
+    print("el grafo de poses corrigió las poses: filtro con las estabilizadas ->", f, flush=True)
+    return run([py, "src/mapas/geo_filter.py", npz, "--out", out, "--poses", stable_npz], env=gpu_env())
+
+
 def run(cmd, env=None):
     """Corre una tarea y anota su RAM pico (ru_maxrss del hijo, vía os.wait4)."""
     print("$ " + " ".join(cmd), flush=True)
@@ -179,6 +196,8 @@ def main():
                 rc = run([py, "src/mapas/o3d_estable.py", npz, "--out", out] +
                          (["--filter", flt] if os.path.isfile(flt) else []) +
                          shlex.split(os.environ.get("O3D_ESTABLE_ARGS", "")))   # p. ej. "--dof4" (proceso por capas)
+            if rc == 0:
+                rc = refiltrar(npz, out + "_estable.npz", py)
         elif t == "prof":
             flt = os.path.join(ex, "estructura", name + "_filtro.npz")
             out = os.path.join(P, "eval", name + "_prof.npz")
@@ -199,6 +218,8 @@ def main():
             else:
                 rc = run([py, "src/mapas/o3d_estable.py", npz, "--out", out] + VARIANTS[t] +
                          (["--filter", flt] if os.path.isfile(flt) else []))
+            if rc == 0:
+                rc = refiltrar(npz, out + "_estable.npz", py)
         elif t in DERIVED and t.startswith("nube"):
             v = DERIVED[t]
             st = os.path.join(ex, v, f"{name}_{v}_estable.npz")
