@@ -1,0 +1,38 @@
+{
+ "vieja (analizador + sinteticos)": {
+  "frames": 422,
+  "paso_mediano": 0.0282,
+  "saltos_5x": 14,
+  "salto_max_sobre_mediana": 20.9,
+  "recorrido": 18.95,
+  "inicio_fin": 0.35,
+  "separacion_ida_vuelta_rel": 0.189,
+  "grafo": "corrección rechazada",
+  "aristas": {
+   "odometria_aceptada": 81,
+   "odometria_rechazada": 23,
+   "cierre_rechazada": 207,
+   "cierre_aceptada": 22,
+   "cierre_podada": 18,
+   "prior_lingbot_aceptada": 104
+  }
+ },
+ "nueva (cadencia uniforme + ICP robusto)": {
+  "frames": 451,
+  "paso_mediano": 0.0229,
+  "saltos_5x": 19,
+  "salto_max_sobre_mediana": 10.1,
+  "recorrido": 15.5,
+  "inicio_fin": 0.18,
+  "separacion_ida_vuelta_rel": 0.017,
+  "grafo": "corrección rechazada",
+  "aristas": {
+   "odometria_aceptada": 101,
+   "odometria_rechazada": 10,
+   "cierre_rechazada": 263,
+   "cierre_aceptada": 14,
+   "cierre_podada": 41,
+   "prior_lingbot_aceptada": 111
+  }
+ }
+}

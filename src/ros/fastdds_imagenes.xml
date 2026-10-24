@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Fast DDS para las imágenes del puente (ros2_bridge.py). Con los valores por defecto (segmento de memoria compartida
+     de 512 KB, buffer UDP de 208 KB) una imagen 540x960 de ~1,5 MB en BEST_EFFORT se fragmenta y casi nunca llega a
+     otro proceso: 11 de 50 a 2 Hz y sin carga (2026-10-18). Con un segmento de 32 MB llegan 50 de 50. Basta en el
+     publicador: en memoria compartida el que escribe reserva en su propio segmento. -->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>shm_grande</transport_id>
+      <type>SHM</type>
+      <segment_size>33554432</segment_size>
+      <maxMessageSize>4194304</maxMessageSize>
+    </transport_descriptor>
+    <transport_descriptor>
+      <transport_id>udp</transport_id>
+      <type>UDPv4</type>
+    </transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="imagenes_grandes" is_default_profile="true">
+    <rtps>
+      <userTransports>
+        <transport_id>shm_grande</transport_id>
+        <transport_id>udp</transport_id>
+      </userTransports>
+      <useBuiltinTransports>false</useBuiltinTransports>
+    </rtps>
+  </participant>
+</profiles>

@@ -1,0 +1,34 @@
+{
+ "ICP punto a plano (sin núcleo)": {
+  "decision": "corrección rechazada",
+  "odometria_aceptada": 80,
+  "odometria_rechazada": 31,
+  "cierre_rechazada": 266,
+  "cierre_podada": 43,
+  "cierre_aceptada": 9,
+  "prior_lingbot_aceptada": 111,
+  "fitness_mediana_antes": 0.721,
+  "fitness_mediana_despues": 0.776,
+  "rmse_mediana_antes": 0.0121,
+  "correccion_max": 0.146,
+  "giro_max_deg": 2.4,
+  "odometria_residuo_max": 0.013,
+  "deriva_cierres_visuales_deg": 32.113
+ },
+ "ICP robusto (Tukey 0.5)": {
+  "decision": "corrección rechazada",
+  "odometria_aceptada": 101,
+  "odometria_rechazada": 10,
+  "cierre_rechazada": 263,
+  "cierre_aceptada": 14,
+  "cierre_podada": 41,
+  "prior_lingbot_aceptada": 111,
+  "fitness_mediana_antes": 0.718,
+  "fitness_mediana_despues": 0.764,
+  "rmse_mediana_antes": 0.0118,
+  "correccion_max": 0.482,
+  "giro_max_deg": 11.6,
+  "odometria_residuo_max": 0.027,
+  "deriva_cierres_visuales_deg": 32.113
+ }
+}

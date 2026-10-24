@@ -1,0 +1,103 @@
+[
+ {
+  "escena": "piso1_capas",
+  "procedencia": {
+   "sesion": "~/Rescue/Rescue_ParaLingbot/captures/pruebas_reales/capas/piso1/streaming/sin_guardar/sesion_20261017_203401/eval/sesion.npz",
+   "frames": 451,
+   "construida": "2026-10-17 21:00",
+   "poses": "estable",
+   "escala_m_por_unidad": 1.2806,
+   "escala_metodo": "mediana de profundidad Depth Anything V2 / LingBot en 40 frames",
+   "escala_calibrada": false,
+   "filtro": {
+    "usado": true,
+    "poses_del_filtro": "basic",
+    "dif_max_m": 0.0,
+    "dif_mediana_m": 0.0,
+    "dif_max_grados": 0.11,
+    "compatible": true
+   },
+   "estructura": true,
+   "estable": {
+    "version_poses": "4219cfb91834b7dc",
+    "sesion": "sesion_20261017_203401/sesion/e1cdea27"
+   },
+   "etiquetas": {
+    "anotada_existe": true,
+    "resuelta": "etiquetas_dinov2_sesion_451_ninguno.npz",
+    "anotada_es_la_usada": true
+   }
+  },
+  "nube": {
+   "voxeles": 41444,
+   "voxel_m": 0.05,
+   "pureza_media": 0.903,
+   "aislados": 0.0009,
+   "frac_pared": 0.409,
+   "frac_piso": 0.15
+  },
+  "nube_vs_estructura": {
+   "paredes": 11,
+   "voxeles_pared": 16930,
+   "frac_pared_a_menos_de_10cm": 0.404,
+   "dist_mediana_m_cerca": 0.16,
+   "desfase_pared_m": 0.025,
+   "concentracion_pared": 0.39,
+   "paredes_medidas": 11
+  },
+  "piso": {
+   "inclinacion_grados": 2.73,
+   "frac_celdas_en_el_plano": 0.541,
+   "espesor_p10_p90_m": 0.189,
+   "camara_sobre_piso_dinov2_m": {
+    "mediana": 1.08,
+    "p10": 0.97,
+    "p90": 1.12,
+    "frac_frames_con_piso": 1.0
+   }
+  },
+  "fisico": {
+   "geoms_colision": {
+    "paredes": 0,
+    "losas": 5,
+    "soporte": 6,
+    "envolventes": 61,
+    "muros_nivel_b": 0,
+    "muros_filtro": 11,
+    "muros_dinov2": 16,
+    "losas_nivel_b": 0,
+    "piezas_modelos": 37,
+    "piezas_genpc": 0,
+    "objetos": 44
+   },
+   "recorrido_m": 19.9,
+   "frac_recorrido_obstruido": 0.0,
+   "obstruido_por_tipo": {},
+   "geoms_que_obstruyen": [],
+   "camara_sobre_piso_colision_m": {
+    "mediana": 1.11,
+    "frac_fuera_de_mano": 0.038
+   },
+   "huella_envolventes_sobre_voxeles": 1.47
+  },
+  "trayectoria": {
+   "recorrido_m": 19.9,
+   "inicio_fin_planta_m": 0.22,
+   "deriva_vertical_al_volver_m": 0.01
+  },
+  "x2": {
+   "tramos": 3,
+   "caminable_m": 19.1,
+   "tramos_m": [
+    5.6,
+    10.1,
+    3.4
+   ],
+   "niveles_de_piso_m": [
+    -0.22,
+    -0.0,
+    -0.22
+   ]
+  }
+ }
+]

@@ -6,7 +6,7 @@
     "size": 4632303465,
     "sha256": "ee665103348e07e6b826d529b8e61de8f413d5432a4f2e84970d6c8fd2e1cd72",
     "profiles": ["core"],
-    "used_by": "demo.py --model_path, scripts_webcam/, scripts_seq/, scripts_gpu/"
+    "used_by": "demo.py --model_path, src/captura/, src/secuencias/, src/gpu/"
   },
   "skyseg": {
     "repo": "JianyuanWang/skyseg",
@@ -24,6 +24,6 @@
     "size": 175997119,
     "sha256": "b09c0f6cf79e1caa2591b946b659487bd7c8208caddd3f80680cbb169617e378",
     "profiles": ["render"],
-    "used_by": "demo_render/batch_demo.py"
+    "used_by": "src/upstream/demo_render/batch_demo.py"
   }
 }

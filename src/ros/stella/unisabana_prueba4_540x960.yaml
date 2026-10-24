@@ -1,0 +1,43 @@
+# Stella-VSLAM, monocular: teléfono en vertical, video unisabana prueba_4 (1080x1920, publicado reescalado a 540x960)
+#
+# INTRÍNSECOS ESTIMADOS, NO CALIBRADOS (docs/STELLA_INTEGRATION.md, etapa 2): mediana del FoV que
+# predice LingBot-Map en captures/pruebas_reales/unisabana/prueba_4/eval/final_m4.npz,
+# reescalada de la imagen de 518 de ancho a la resolución completa; principal en el centro; sin
+# distorsión. Sirven para arrancar y medir; reemplazar por una calibración con patrón cuando se haga.
+# Debe recibir la imagen YA ROTADA como la ve LingBot (el publicador aplica la misma rotación).
+
+Camera:
+  name: "teléfono en vertical, video unisabana prueba_4 (1080x1920, publicado reescalado a 540x960)"
+  setup: "monocular"
+  model: "perspective"
+  fx: 682.2
+  fy: 680.9
+  cx: 270.0
+  cy: 480.0
+  k1: 0.0
+  k2: 0.0
+  p1: 0.0
+  p2: 0.0
+  k3: 0.0
+  fps: 10.0
+  cols: 540
+  rows: 960
+  color_order: "RGB"
+
+Preprocessing:
+  min_size: 800
+
+Feature:
+  name: "default ORB feature extraction setting"
+  scale_factor: 1.2
+  num_levels: 8
+  ini_fast_threshold: 20
+  min_fast_threshold: 7
+
+Mapping:
+  baseline_dist_thr_ratio: 0.02
+  redundant_obs_ratio_thr: 0.9
+  num_covisibilities_for_landmark_generation: 20
+  num_covisibilities_for_landmark_fusion: 20
+
+# Relocalización y cierre de bucle quedan con los valores por defecto de stella_vslam.
